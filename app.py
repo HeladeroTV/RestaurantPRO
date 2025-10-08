@@ -44,7 +44,7 @@ def generar_resumen_pedido(pedido):
 
 def obtener_titulo_pedido(pedido):
     if pedido.get("mesa_numero") == 99 and pedido.get("numero_app"):
-        return f"App #{pedido['numero_app']:03d}"
+        return f"Digital #{pedido['numero_app']:03d}"  # ✅ CAMBIAR A "Digital"
     else:
         return f"Mesa {pedido['mesa_numero']}"
 
@@ -204,10 +204,10 @@ def crear_mesas_grid(backend_service, on_select):
                 alignment=ft.MainAxisAlignment.CENTER,
                 controls=[
                     ft.Icon(ft.Icons.MOBILE_FRIENDLY, color=ft.Colors.AMBER_400),
-                    ft.Text("App", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                    ft.Text("Digital", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),  # ✅ CAMBIAR A "Digital"
                 ]
             ),
-            ft.Text("📱 Pedido por App", size=12, color=ft.Colors.WHITE),
+            ft.Text("📱 Pedido por Digital", size=12, color=ft.Colors.WHITE),  # ✅ CAMBIAR A "Digital"
             ft.Text("Siempre disponible", size=10, color=ft.Colors.WHITE),
         ]
     )
@@ -319,7 +319,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                 return
 
             if mesa_seleccionada["numero"] == 99:
-                mesa_info.value = "App - Pedidos por aplicación móvil"
+                mesa_info.value = "Digital - Pedidos por aplicación móvil"  # ✅ CAMBIAR A "Digital"
             else:
                 mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
 
@@ -654,6 +654,18 @@ def crear_vista_caja(backend_service, on_update_ui, page):
         )
         cambio_text = ft.Text("Cambio: $0.00", size=14, weight=ft.FontWeight.BOLD)
 
+        # ✅ DROPDOWN PARA MÉTODO DE PAGO
+        metodo_pago = ft.Dropdown(
+            label="Método de pago",
+            options=[
+                ft.dropdown.Option("Efectivo"),
+                ft.dropdown.Option("Tarjeta"),
+                ft.dropdown.Option("QR"),
+            ],
+            value="Efectivo",  # Valor por defecto
+            width=200
+        )
+
         def procesar_pago(e):
             try:
                 pago = float(pago_cliente.value)
@@ -700,6 +712,9 @@ def crear_vista_caja(backend_service, on_update_ui, page):
                     )
                 ]),
                 cambio_text,
+                ft.Row([
+                    metodo_pago,  # ✅ DROPDOWN DE MÉTODO DE PAGO
+                ]),
                 ft.Row([
                     ft.ElevatedButton(
                         "Terminar pedido",
