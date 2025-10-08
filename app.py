@@ -340,44 +340,19 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             return
 
         try:
-            if mesa_seleccionada["numero"] == 99:
-                # Crear pedido para App
-                nuevo_pedido = backend_service.crear_pedido(99, [], "Pendiente", nota_pedido.value)
-                pedido_completo = {
-                    "id": nuevo_pedido["id"],
-                    "mesa_numero": nuevo_pedido["mesa_numero"],
-                    "items": nuevo_pedido["items"],
-                    "estado": nuevo_pedido["estado"],
-                    "fecha_hora": nuevo_pedido["fecha_hora"],
-                    "numero_app": nuevo_pedido.get("numero_app"),
-                    "notas": nuevo_pedido.get("notas", "")
-                }
-                estado["pedido_actual"] = pedido_completo
-            else:
-                if not tamaño_grupo_input.value:
-                    return
+            # ✅ CREAR PEDIDO EN MEMORIA (NO EN BASE DE DATOS AÚN)
+            nuevo_pedido = {
+                "id": None,  # Aún no tiene ID
+                "mesa_numero": mesa_seleccionada["numero"],
+                "items": [],
+                "estado": "Tomando pedido",  # ✅ ESTADO TEMPORAL
+                "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "numero_app": None,
+                "notas": nota_pedido.value
+            }
 
-                try:
-                    tamaño = int(tamaño_grupo_input.value)
-                    if tamaño <= 0:
-                        raise ValueError
-                except ValueError:
-                    return
-
-                nuevo_pedido = backend_service.crear_pedido(mesa_seleccionada["numero"], [], "Pendiente", nota_pedido.value)
-                pedido_completo = {
-                    "id": nuevo_pedido["id"],
-                    "mesa_numero": nuevo_pedido["mesa_numero"],
-                    "items": nuevo_pedido["items"],
-                    "estado": nuevo_pedido["estado"],
-                    "fecha_hora": nuevo_pedido["fecha_hora"],
-                    "numero_app": nuevo_pedido.get("numero_app"),
-                    "notas": nuevo_pedido.get("notas", "")
-                }
-                estado["pedido_actual"] = pedido_completo
-                tamaño_grupo_input.value = ""
-
-            # ✅ ACTUALIZAR LA INTERFAZ COMPLETA (incluyendo mesas)
+            estado["pedido_actual"] = nuevo_pedido
+            resumen_pedido.value = ""
             on_update_ui()
             actualizar_estado_botones()
             
@@ -396,28 +371,40 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             return
 
         try:
-            # Agregar ítem al pedido en el backend
-            items_actuales = pedido_actual.get("items", [])
-            items_actuales.append({
-                "nombre": item["nombre"],
-                "precio": item["precio"],
-                "tipo": item["tipo"],
-                "cantidad": 1
-            })
-            
-            # Actualizar el pedido en el backend
-            resultado = backend_service.actualizar_pedido(
-                pedido_actual["id"],
-                pedido_actual["mesa_numero"],
-                items_actuales,
-                pedido_actual["estado"],
-                pedido_actual.get("notas", "")
-            )
-            
-            # Actualizar el pedido localmente
-            pedido_actual["items"] = items_actuales
-            estado["pedido_actual"] = pedido_actual
-            
+            # ✅ SOLO ACTUALIZAR EN MEMORIA SI AÚN NO TIENE ID
+            if pedido_actual["id"] is None:
+                items_actuales = pedido_actual.get("items", [])
+                items_actuales.append({
+                    "nombre": item["nombre"],
+                    "precio": item["precio"],
+                    "tipo": item["tipo"],
+                    "cantidad": 1
+                })
+                pedido_actual["items"] = items_actuales
+                estado["pedido_actual"] = pedido_actual
+            else:
+                # ✅ SI YA TIENE ID, ACTUALIZAR EN LA BASE DE DATOS
+                items_actuales = pedido_actual.get("items", [])
+                items_actuales.append({
+                    "nombre": item["nombre"],
+                    "precio": item["precio"],
+                    "tipo": item["tipo"],
+                    "cantidad": 1
+                })
+                
+                # Actualizar el pedido en el backend
+                resultado = backend_service.actualizar_pedido(
+                    pedido_actual["id"],
+                    pedido_actual["mesa_numero"],
+                    items_actuales,
+                    pedido_actual["estado"],
+                    pedido_actual.get("notas", "")
+                )
+                
+                # Actualizar el pedido localmente
+                pedido_actual["items"] = items_actuales
+                estado["pedido_actual"] = pedido_actual
+                
             # Actualizar resumen
             resumen = generar_resumen_pedido(pedido_actual)
             resumen_pedido.value = resumen
@@ -457,16 +444,30 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         if not pedido_actual:
             return
 
+        if not pedido_actual.get("items"):
+            return  # ✅ No confirmar si no tiene ítems
+
         try:
-            # Actualizar el pedido con la nota
-            backend_service.actualizar_pedido(
-                pedido_actual["id"],
-                pedido_actual["mesa_numero"],
-                pedido_actual["items"],
-                "Pendiente",  # Cambia a "En preparacion" si prefieres
-                nota_pedido.value
-            )
-            on_update_ui()  # ✅ ESTO ACTUALIZA LAS OTRAS PESTAÑAS
+            if pedido_actual["id"] is None:
+                # ✅ ES UN NUEVO PEDIDO, CREARLO EN LA BASE DE DATOS
+                nuevo_pedido = backend_service.crear_pedido(
+                    pedido_actual["mesa_numero"],
+                    pedido_actual["items"],
+                    "Pendiente",  # ✅ ESTADO REAL
+                    pedido_actual["notas"]
+                )
+                estado["pedido_actual"] = nuevo_pedido
+            else:
+                # ✅ ACTUALIZAR UN PEDIDO EXISTENTE
+                backend_service.actualizar_pedido(
+                    pedido_actual["id"],
+                    pedido_actual["mesa_numero"],
+                    pedido_actual["items"],
+                    "Pendiente",
+                    pedido_actual["notas"]
+                )
+
+            on_update_ui()  # ✅ ACTUALIZA LAS OTRAS PESTAÑAS
 
             # Reproducir sonido en un hilo separado para no bloquear la UI
             threading.Thread(target=reproducir_sonido_pedido, daemon=True).start()
@@ -561,7 +562,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             pedidos = backend_service.obtener_pedidos_activos()
             lista_pedidos.controls.clear()
             for pedido in pedidos:
-                # ✅ SOLO MOSTRAR SI TIENE ITEMS Y ESTÁ EN ESTADO CORRECTO
+                # ✅ EXCLUIR ESTADO "Tomando pedido"
                 if pedido.get("estado") in ["Pendiente", "En preparacion", "Listo", "Entregado"] and pedido.get("items"):
                     lista_pedidos.controls.append(crear_item_pedido_cocina(pedido, backend_service, on_update_ui))
             page.update()
