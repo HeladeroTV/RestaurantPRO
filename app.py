@@ -448,13 +448,15 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             return  # ✅ No confirmar si no tiene ítems
 
         try:
+            nota_a_guardar = nota_pedido.value.strip() if nota_pedido.value else ""  # ✅ ASEGURAR QUE NO SEA None
+
             if pedido_actual["id"] is None:
                 # ✅ ES UN NUEVO PEDIDO, CREARLO EN LA BASE DE DATOS
                 nuevo_pedido = backend_service.crear_pedido(
                     pedido_actual["mesa_numero"],
                     pedido_actual["items"],
                     "Pendiente",  # ✅ ESTADO REAL
-                    pedido_actual["notas"]
+                    nota_a_guardar  # ✅ ENVIAR NOTA
                 )
                 estado["pedido_actual"] = nuevo_pedido
             else:
@@ -464,7 +466,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                     pedido_actual["mesa_numero"],
                     pedido_actual["items"],
                     "Pendiente",
-                    pedido_actual["notas"]
+                    nota_a_guardar  # ✅ ENVIAR NOTA
                 )
 
             on_update_ui()  # ✅ ACTUALIZA LAS OTRAS PESTAÑAS
@@ -578,12 +580,16 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
                 print(f"Error al cambiar estado: {ex}")
 
         origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
-        nota = f"Notas: {pedido.get('notas', 'Ninguna')}"
+        nota_texto = pedido.get("notas", "").strip()
+        if not nota_texto:
+            nota_texto = "Sin notas"
+        nota = f"Notas: {nota_texto}"  # ✅ SIEMPRE MOSTRAR ALGO
+
         return ft.Container(
             content=ft.Column([
                 ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
                 ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(nota, color=ft.Colors.YELLOW_200),
+                ft.Text(nota, color=ft.Colors.YELLOW_200),  # ✅ MOSTRAR NOTA AQUÍ
                 ft.Row([
                     ft.ElevatedButton(
                         "En preparacion",
