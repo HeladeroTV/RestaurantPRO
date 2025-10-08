@@ -8,6 +8,15 @@ from typing import List, Dict, Any
 # Crea la vista de inventario con controles para agregar, editar y eliminar productos.
 
 def crear_vista_inventario(inventory_service, on_update_ui, page):
+    # ✅ SECCIÓN DE ALERTAS - AQUÍ SE MOSTRARÁN LOS AVISOS
+    alertas = ft.Container(
+        content=ft.Text("", color=ft.Colors.RED_700, weight=ft.FontWeight.BOLD),
+        bgcolor=ft.Colors.AMBER_100,
+        padding=10,
+        border_radius=5,
+        visible=False  # ✅ OCULTAR SI NO HAY ALERTAS
+    )
+
     # Campos de entrada
     nombre_input = ft.TextField(label="Nombre del producto", width=300)
     cantidad_input = ft.TextField(
@@ -25,13 +34,25 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         auto_scroll=True,
     )
 
-    # === FUNCIÓN: actualizar_lista ===
-    # Actualiza la lista de items en la vista con los datos del backend.
-
     def actualizar_lista():
         try:
             items = inventory_service.obtener_inventario()
             lista_inventario.controls.clear()
+
+            # ✅ VERIFICAR ALERTAS DE INGREDIENTES BAJOS
+            umbral_bajo = 5  # ✅ UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
+            ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
+
+            # ✅ MOSTRAR ALERTA SI HAY INGREDIENTES BAJOS
+            if ingredientes_bajos:
+                nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
+                alertas.content.value = f"⚠️ Alerta: {nombres_bajos} están por debajo del umbral ({umbral_bajo})"
+                alertas.visible = True
+            else:
+                alertas.visible = False
+
+            page.update()  # ✅ ACTUALIZAR ALERTA
+
             for item in items:
                 item_row = ft.Container(
                     content=ft.Column([
@@ -68,9 +89,6 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         except Exception as e:
             print(f"Error al cargar inventario: {e}")
 
-    # === FUNCIÓN: agregar_item_click ===
-    # Maneja el evento de agregar un nuevo ítem al inventario.
-
     def agregar_item_click(e):
         nombre = nombre_input.value
         cantidad = cantidad_input.value
@@ -87,9 +105,6 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
             on_update_ui()
         except Exception as ex:
             print(f"Error al agregar ítem: {ex}")
-
-    # === FUNCIÓN: actualizar_item_click ===
-    # Maneja el evento de actualizar la cantidad de un ítem existente.
 
     def actualizar_item_click(item_id: int, input_field):
         try:
@@ -116,9 +131,6 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         except Exception as ex:
             print(f"Error al actualizar ítem: {ex}")
 
-    # === FUNCIÓN: eliminar_item_click ===
-    # Maneja el evento de eliminar un ítem del inventario.
-
     def eliminar_item_click(item_id: int):
         try:
             inventory_service.eliminar_item_inventario(item_id)
@@ -128,6 +140,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
 
     vista = ft.Container(
         content=ft.Column([
+            # ✅ AGREGAR LA SECCIÓN DE ALERTAS AQUÍ
+            alertas,  # ✅ SECCIÓN DE ALERTAS
+            ft.Divider(),
             ft.Text("Inventario", size=24, weight=ft.FontWeight.BOLD),
             ft.Divider(),
             ft.Text("Agregar nuevo ítem", size=18, weight=ft.FontWeight.BOLD),
