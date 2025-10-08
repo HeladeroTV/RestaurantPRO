@@ -473,31 +473,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         except Exception as ex:
             print(f"Error al confirmar pedido: {ex}")
 
-    def liberar_mesa(e):
-        mesa_seleccionada = estado["mesa_seleccionada"]
-        if not mesa_seleccionada:
-            return
-
-        try:
-            if mesa_seleccionada["numero"] == 99:
-                estado["pedido_actual"] = None
-            else:
-                # ✅ Eliminar el pedido de la mesa física
-                if estado["pedido_actual"]:
-                    backend_service.eliminar_pedido(estado["pedido_actual"]["id"])
-
-            # ✅ ACTUALIZAR LA INTERFAZ COMPLETA (esto refresca las mesas del backend)
-            on_update_ui()
-            estado["mesa_seleccionada"] = None
-            mesa_info.value = ""
-            resumen_pedido.value = ""
-            nota_pedido.value = ""
-            actualizar_estado_botones()
-
-        except Exception as ex:
-            print(f"Error al liberar mesa: {ex}")
-
-
+    
     asignar_btn.on_click = asignar_cliente
     agregar_item_btn.on_click = agregar_item_pedido
     eliminar_ultimo_btn.on_click = eliminar_ultimo_item
@@ -828,7 +804,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         prefix_icon=ft.Icons.PHONE
     )
 
-    # Lista de clientes
+    # ✅ LISTA DE CLIENTES - AUMENTAR ESPACIO VERTICAL
     lista_clientes = ft.ListView(
         expand=1,
         spacing=10,
@@ -920,10 +896,15 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
             ),
             ft.Divider(),
             ft.Text("Clientes Registrados", size=20, weight=ft.FontWeight.BOLD),
-            lista_clientes
+            # ✅ AUMENTAR ESPACIO VERTICAL PARA LISTA DE CLIENTES
+            ft.Container(
+                content=lista_clientes,
+                expand=True  # ✅ ESTO HACE QUE SE EXPANDA
+            )
         ]),
         padding=20,
-        bgcolor=ft.Colors.BLUE_GREY_900
+        bgcolor=ft.Colors.BLUE_GREY_900,
+        expand=True  # ✅ ESTO HACE QUE TODO SE EXPANDA
     )
 
     vista.actualizar_lista_clientes = actualizar_lista_clientes
