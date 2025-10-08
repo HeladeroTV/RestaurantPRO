@@ -552,17 +552,29 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             except Exception as ex:
                 print(f"Error al cambiar estado: {ex}")
 
-        origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
-        nota_texto = pedido.get("notas", "").strip()
-        if not nota_texto:
-            nota_texto = "Sin notas"
-        nota = f"Notas: {nota_texto}"  # ✅ SIEMPRE MOSTRAR ALGO
+        def eliminar_pedido_click(e):
+            try:
+                # ✅ ELIMINAR EL PEDIDO DE LA BASE DE DATOS
+                backend_service.eliminar_pedido(pedido["id"])
+                on_update_ui()  # ✅ ACTUALIZAR INTERFAZ
+            except Exception as ex:
+                print(f"Error al eliminar pedido: {ex}")
 
+        origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
+        nota = f"Notas: {pedido.get('notas', 'Ninguna')}"
         return ft.Container(
             content=ft.Column([
-                ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
+                ft.Row([
+                    ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
+                    ft.IconButton(
+                        icon=ft.Icons.DELETE,
+                        on_click=eliminar_pedido_click,
+                        tooltip="Eliminar pedido",
+                        icon_color=ft.Colors.RED_700
+                    )
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(nota, color=ft.Colors.YELLOW_200),  # ✅ MOSTRAR NOTA AQUÍ
+                ft.Text(nota, color=ft.Colors.YELLOW_200),
                 ft.Row([
                     ft.ElevatedButton(
                         "En preparacion",
