@@ -277,11 +277,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         style=ft.ButtonStyle(bgcolor=ft.Colors.AMBER_700, color=ft.Colors.WHITE)
     )
 
-    liberar_btn = ft.ElevatedButton(
-        text="Liberar Mesa",
-        disabled=True,
-        style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
-    )
+    
 
     resumen_pedido = ft.Text("", size=14)
 
@@ -294,7 +290,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             agregar_item_btn.disabled = True
             eliminar_ultimo_btn.disabled = True
             confirmar_pedido_btn.disabled = True
-            liberar_btn.disabled = True
+            
             return
 
         if mesa_seleccionada.get("numero") == 99:
@@ -302,13 +298,13 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             agregar_item_btn.disabled = pedido_actual is None
             eliminar_ultimo_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
             confirmar_pedido_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
-            liberar_btn.disabled = pedido_actual is None
+            
         else:
             asignar_btn.disabled = mesa_seleccionada.get("ocupada", False)
             agregar_item_btn.disabled = pedido_actual is None
             eliminar_ultimo_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
             confirmar_pedido_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
-            liberar_btn.disabled = not mesa_seleccionada.get("ocupada", False)
+            
 
         page.update()
 
@@ -506,7 +502,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
     agregar_item_btn.on_click = agregar_item_pedido
     eliminar_ultimo_btn.on_click = eliminar_ultimo_item
     confirmar_pedido_btn.on_click = confirmar_pedido
-    liberar_btn.on_click = liberar_mesa
+    
 
     panel = ft.Container(
         content=ft.Column(
@@ -528,7 +524,6 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                 eliminar_ultimo_btn,
                 confirmar_pedido_btn,
                 ft.Divider(),
-                liberar_btn,
                 ft.Divider(),
                 ft.Text("Resumen del pedido", size=16, weight=ft.FontWeight.BOLD),
                 ft.Container(
