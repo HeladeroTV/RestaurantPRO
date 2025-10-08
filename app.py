@@ -562,19 +562,18 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             pedidos = backend_service.obtener_pedidos_activos()
             lista_pedidos.controls.clear()
             for pedido in pedidos:
-                # ✅ EXCLUIR ESTADO "Tomando pedido"
-                if pedido.get("estado") in ["Pendiente", "En preparacion", "Listo", "Entregado"] and pedido.get("items"):
+                # ✅ SOLO MOSTRAR SI ESTÁ PENDIENTE O EN PREPARACIÓN
+                if pedido.get("estado") in ["Pendiente", "En preparacion"] and pedido.get("items"):
                     lista_pedidos.controls.append(crear_item_pedido_cocina(pedido, backend_service, on_update_ui))
             page.update()
         except Exception as e:
             print(f"Error al cargar pedidos: {e}")
-            
-            
+
     def crear_item_pedido_cocina(pedido, backend_service, on_update_ui):
         def cambiar_estado(e, p, nuevo_estado):
             try:
                 backend_service.actualizar_estado_pedido(p["id"], nuevo_estado)
-                on_update_ui()
+                on_update_ui()  # ✅ ACTUALIZA AMBAS VISTAS
             except Exception as ex:
                 print(f"Error al cambiar estado: {ex}")
 
@@ -584,7 +583,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             content=ft.Column([
                 ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
                 ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(nota, color=ft.Colors.YELLOW_200),  # ← Nueva línea
+                ft.Text(nota, color=ft.Colors.YELLOW_200),
                 ft.Row([
                     ft.ElevatedButton(
                         "En preparacion",
@@ -634,6 +633,7 @@ def crear_vista_caja(backend_service, on_update_ui, page):
             pedidos = backend_service.obtener_pedidos_activos()
             lista_cuentas.controls.clear()
             for pedido in pedidos:
+                # ✅ MOSTRAR SI ESTÁ LISTO, ENTREGADO O PAGADO
                 if pedido.get("estado") in ["Listo", "Entregado", "Pagado"] and pedido.get("items"):
                     item = crear_item_cuenta(pedido, backend_service, on_update_ui, page)
                     if item:
@@ -643,11 +643,34 @@ def crear_vista_caja(backend_service, on_update_ui, page):
             print(f"Error al cargar pedidos: {e}")
 
     def crear_item_cuenta(pedido, backend_service, on_update_ui, page):
+        total_pedido = sum(item["precio"] for item in pedido["items"])
+
+        # ✅ CAMPOS PARA PAGO Y CAMBIO
+        pago_cliente = ft.TextField(
+            label="Con cuánto paga",
+            input_filter=ft.NumbersOnlyInputFilter(),
+            width=200
+        )
+        cambio_text = ft.Text("Cambio: $0.00", size=14, weight=ft.FontWeight.BOLD)
+
         def procesar_pago(e):
             try:
+                pago = float(pago_cliente.value)
+                if pago < total_pedido:
+                    return
+                cambio = pago - total_pedido
+                cambio_text.value = f"Cambio: ${cambio:.2f}"
+                page.update()
+            except ValueError:
+                pass
+
+        def terminar_pedido(e):
+            try:
+                # ✅ ACTUALIZAR ESTADO A "Pagado"
+                backend_service.actualizar_estado_pedido(pedido["id"], "Pagado")
                 on_update_ui()
             except Exception as ex:
-                print(f"Error al procesar pago: {ex}")
+                print(f"Error al terminar pedido: {ex}")
 
         def eliminar_pedido(e):
             try:
@@ -666,10 +689,20 @@ def crear_vista_caja(backend_service, on_update_ui, page):
                 ft.Text(f"Cliente {cliente_id}"),
                 ft.Text(f"Estado: {pedido.get('estado', 'Pendiente')}", color=ft.Colors.BLUE_200),
                 ft.Text(generar_resumen_pedido(pedido)),
+                ft.Text(f"Total: ${total_pedido:.2f}", size=16, weight=ft.FontWeight.BOLD),
+                ft.Row([
+                    pago_cliente,
+                    ft.ElevatedButton(
+                        "Calcular cambio",
+                        on_click=procesar_pago,
+                        style=ft.ButtonStyle(bgcolor=ft.Colors.AMBER_700, color=ft.Colors.WHITE)
+                    )
+                ]),
+                cambio_text,
                 ft.Row([
                     ft.ElevatedButton(
-                        "Procesar pago",
-                        on_click=procesar_pago,
+                        "Terminar pedido",
+                        on_click=terminar_pedido,
                         style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
                     ),
                     ft.ElevatedButton(
