@@ -111,8 +111,34 @@ def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = De
         ))
         
         result = cursor.fetchone()
-        conn.commit()
         
+        # ✅ RESTAR INGREDIENTES DE LAS RECETAS (SOLO SI TIENEN RECETA)
+        for item in pedido.items:
+            nombre_item = item['nombre']
+            try:
+                cursor.execute("""
+                    SELECT r.id
+                    FROM recetas r
+                    WHERE r.nombre = %s
+                """, (nombre_item,))
+                receta = cursor.fetchone()
+                if receta:
+                    cursor.execute("""
+                        SELECT ir.ingrediente_id, ir.cantidad_necesaria
+                        FROM ingredientes_recetas ir
+                        WHERE ir.receta_id = %s
+                    """, (receta['id'],))
+                    for ing in cursor.fetchall():
+                        cursor.execute("""
+                            UPDATE inventario
+                            SET cantidad_disponible = cantidad_disponible - %s
+                            WHERE id = %s
+                        """, (ing['cantidad_necesaria'], ing['ingrediente_id']))
+            except Exception:
+                # ✅ SI NO EXISTE LA TABLA O HAY ERROR, CONTINUAR IGUAL
+                pass
+        
+        conn.commit()
         # ✅ CORREGIDO: Convertir datetime a string si es necesario
         fecha_hora_str = result['fecha_hora'].strftime("%Y-%m-%d %H:%M:%S") if isinstance(result['fecha_hora'], datetime) else result['fecha_hora']
         
@@ -368,6 +394,29 @@ def actualizar_pedido(pedido_id: int, pedido_actualizado: PedidoCreate, conn: ps
             pedido_actualizado.notas,
             pedido_id
         ))
+        
+        # ✅ RESTAR INGREDIENTES DE LAS RECETAS (SOLO SI TIENEN RECETA)
+        for item in pedido_actualizado.items:
+            nombre_item = item['nombre']
+            cursor.execute("""
+                SELECT r.id
+                FROM recetas r
+                WHERE r.nombre = %s
+            """, (nombre_item,))
+            receta = cursor.fetchone()
+            if receta:
+                cursor.execute("""
+                    SELECT ir.ingrediente_id, ir.cantidad_necesaria
+                    FROM ingredientes_recetas ir
+                    WHERE ir.receta_id = %s
+                """, (receta['id'],))
+                for ing in cursor.fetchall():
+                    cursor.execute("""
+                        UPDATE inventario
+                        SET cantidad_disponible = cantidad_disponible - %s
+                        WHERE id = %s
+                    """, (ing['cantidad_necesaria'], ing['ingrediente_id']))
+        
         conn.commit()
         return {"status": "ok", "message": "Pedido actualizado"}
 
