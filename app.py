@@ -804,9 +804,9 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         prefix_icon=ft.Icons.PHONE
     )
 
-    # ✅ LISTA DE CLIENTES - AUMENTAR ESPACIO VERTICAL
+    # ✅ LISTA DE CLIENTES - CON ESPACIO MÁXIMO HORIZONTAL Y VERTICAL
     lista_clientes = ft.ListView(
-        expand=1,
+        expand=True,  # ✅ EXPANDIR PARA OCUPAR TODO EL ESPACIO
         spacing=10,
         padding=20,
         auto_scroll=True,
@@ -896,15 +896,19 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
             ),
             ft.Divider(),
             ft.Text("Clientes Registrados", size=20, weight=ft.FontWeight.BOLD),
-            # ✅ AUMENTAR ESPACIO VERTICAL PARA LISTA DE CLIENTES
+            # ✅ SECCIÓN SEPARADA PARA CLIENTES REGISTRADOS - OCUPA TODO EL ANCHO
             ft.Container(
                 content=lista_clientes,
-                expand=True  # ✅ ESTO HACE QUE SE EXPANDA
+                expand=True,  # ✅ CONTAINER EXPANDIDO
+                height=500,  # ✅ ALTURA AMPLIA
+                bgcolor=ft.Colors.BLUE_GREY_900,  # ✅ FONDO PARA VER MEJOR
+                padding=10,
+                border_radius=10,
             )
-        ]),
+        ], expand=True, scroll="auto"),  # ✅ SCROLL VERTICAL EN LA COLUMNA
         padding=20,
         bgcolor=ft.Colors.BLUE_GREY_900,
-        expand=True  # ✅ ESTO HACE QUE TODO SE EXPANDA
+        expand=True  # ✅ CONTAINER PRINCIPAL EXPANDIDO
     )
 
     vista.actualizar_lista_clientes = actualizar_lista_clientes
