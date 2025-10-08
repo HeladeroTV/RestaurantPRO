@@ -9,13 +9,19 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 import json
 
+
+
+
+
 # IMPORTAR LA SUB-APP DE INVENTARIO
 from inventario_backend import inventario_app
+from recetas_backend import recetas_app
 
 app = FastAPI(title="RestaurantIA Backend")
 
 # Montar la sub-app de inventario
 app.mount("/inventario", inventario_app)
+app.mount("/recetas", recetas_app)
 
 # Configuración directa de PostgreSQL
 DATABASE_URL = "dbname=restaurant_db user=postgres password=postgres host=localhost port=5432"

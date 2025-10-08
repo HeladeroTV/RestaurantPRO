@@ -10,9 +10,11 @@ import requests
 import winsound
 import time as time_module
 
+
 # IMPORTAR LAS NUEVAS CLASES DE INVENTARIO
 from inventario_view import crear_vista_inventario
 from inventario_service import InventoryService
+from recetas_view import crear_vista_recetas
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -920,15 +922,18 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
 class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
+        from recetas_service import RecetasService  # ✅ IMPORTAR SERVICIO DE RECETAS
         self.backend_service = BackendService()
-        self.inventory_service = InventoryService()  # ← Añadir esta línea
+        self.inventory_service = InventoryService()
+        self.recetas_service = RecetasService()  # ✅ INICIALIZAR SERVICIO DE RECETAS
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
         self.vista_cocina = None
         self.vista_caja = None
         self.vista_admin = None
-        self.vista_inventario = None  # ← Añadir esta línea
+        self.vista_inventario = None
+        self.vista_recetas = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
 
     def main(self, page: ft.Page):
@@ -963,6 +968,7 @@ class RestauranteGUI:
         self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
+        self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE RECETAS
 
         tabs = ft.Tabs(
             selected_index=0,
@@ -992,6 +998,11 @@ class RestauranteGUI:
                     text="Inventario",
                     icon=ft.Icons.INVENTORY_2,
                     content=self.vista_inventario
+                ),
+                ft.Tab(  # ✅ PESTAÑA DE RECETAS
+                    text="Recetas",
+                    icon=ft.Icons.BOOK,
+                    content=self.vista_recetas
                 ),
             ],
             expand=1
