@@ -16,6 +16,7 @@ from inventario_view import crear_vista_inventario
 from inventario_service import InventoryService
 from recetas_view import crear_vista_recetas
 from configuraciones_view import crear_vista_configuraciones
+from reportes_view import crear_vista_reportes
 
 
 
@@ -672,8 +673,8 @@ def crear_vista_caja(backend_service, on_update_ui, page):
 
         def terminar_pedido(e):
             try:
-                # ✅ ACTUALIZAR ESTADO A "Pagado"
-                backend_service.actualizar_estado_pedido(pedido["id"], "Pagado")
+                # ✅ CAMBIAR ESTADO A "Entregado" EN LUGAR DE "Pagado"
+                backend_service.actualizar_estado_pedido(pedido["id"], "Entregado")
                 on_update_ui()
             except Exception as ex:
                 print(f"Error al terminar pedido: {ex}")
@@ -953,6 +954,7 @@ class RestauranteGUI:
         self.vista_recetas = None  # ✅ AGREGAR ESTO
         self.vista_configuraciones = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
+        self.vista_reportes = None
         
 
     def main(self, page: ft.Page):
@@ -987,13 +989,14 @@ class RestauranteGUI:
         self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
-        self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE RECETAS
+        self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)
         self.vista_configuraciones = crear_vista_configuraciones(
-            self.config_service,          # ✅ SERVICIO DE CONFIGURACIONES
-            self.inventory_service,       # ✅ SERVICIO DE INVENTARIO
-            self.actualizar_ui_completo,  # ✅ FUNCIÓN DE ACTUALIZACIÓN
-            page                          # ✅ OBJETO DE PÁGINA
+            self.config_service,
+            self.inventory_service,
+            self.actualizar_ui_completo,
+            page
         )  # ✅ CREAR VISTA DE CONFIGURACIONES
+        self.vista_reportes = crear_vista_reportes(self.backend_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE REPORTES
 
         tabs = ft.Tabs(
             selected_index=0,
@@ -1024,15 +1027,20 @@ class RestauranteGUI:
                     icon=ft.Icons.INVENTORY_2,
                     content=self.vista_inventario
                 ),
-                ft.Tab(  # ✅ PESTAÑA DE RECETAS
+                ft.Tab(
                     text="Recetas",
                     icon=ft.Icons.BOOK,
                     content=self.vista_recetas
                 ),
-                ft.Tab(  # ✅ PESTAÑA DE CONFIGURACIONES
+                ft.Tab(
                     text="Configuraciones",
                     icon=ft.Icons.SETTINGS,
                     content=self.vista_configuraciones
+                ),
+                ft.Tab(  # ✅ PESTAÑA DE REPORTES
+                    text="Reportes",
+                    icon=ft.Icons.ANALYTICS,
+                    content=self.vista_reportes
                 ),
             ],
             expand=1

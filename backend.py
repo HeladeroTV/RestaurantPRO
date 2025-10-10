@@ -498,3 +498,62 @@ def eliminar_cliente(cliente_id: int, conn: psycopg2.extensions.connection = Dep
             raise HTTPException(status_code=404, detail="Cliente no encontrado")
         conn.commit()
         return {"status": "ok", "message": "Cliente eliminado"}
+    
+@app.get("/reportes")
+def obtener_reporte(
+    tipo: str,
+    start_date: str,
+    end_date: str,
+    conn: psycopg2.extensions.connection = Depends(get_db)
+):
+    with conn.cursor() as cursor:
+        # Consultar pedidos en el rango de fechas
+        cursor.execute("""
+            SELECT items, estado, fecha_hora
+            FROM pedidos
+            WHERE fecha_hora >= %s AND fecha_hora < %s
+            AND estado IN ('Listo', 'Entregado', 'Pagado')
+        """, (start_date, end_date))
+        
+        pedidos = cursor.fetchall()
+        
+        # Calcular estadísticas
+        ventas_totales = 0
+        pedidos_totales = len(pedidos)
+        productos_vendidos = 0
+        productos_mas_vendidos = {}
+
+        for pedido in pedidos:
+            # ✅ CORREGIR: El campo 'items' ya es una lista, no necesita json.loads()
+            items = pedido['items']
+            
+            # ✅ VERIFICAR SI ES STRING Y PARSEAR SI ES NECESARIO
+            if isinstance(items, str):
+                items = json.loads(items)
+            
+            for item in items:
+                nombre = item['nombre']
+                precio = item['precio']
+                
+                ventas_totales += precio
+                productos_vendidos += 1
+                
+                # Contar productos más vendidos
+                if nombre in productos_mas_vendidos:
+                    productos_mas_vendidos[nombre] += 1
+                else:
+                    productos_mas_vendidos[nombre] = 1
+
+        # Ordenar productos más vendidos
+        productos_mas_vendidos_lista = sorted(
+            [{'nombre': k, 'cantidad': v} for k, v in productos_mas_vendidos.items()],
+            key=lambda x: x['cantidad'],
+            reverse=True
+        )[:10]  # Top 10
+
+        return {
+            "ventas_totales": round(ventas_totales, 2),
+            "pedidos_totales": pedidos_totales,
+            "productos_vendidos": productos_vendidos,
+            "productos_mas_vendidos": productos_mas_vendidos_lista
+        }
