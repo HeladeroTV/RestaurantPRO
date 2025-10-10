@@ -15,6 +15,8 @@ import time as time_module
 from inventario_view import crear_vista_inventario
 from inventario_service import InventoryService
 from recetas_view import crear_vista_recetas
+from configuraciones_view import crear_vista_configuraciones
+
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -935,9 +937,11 @@ class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
         from recetas_service import RecetasService  # ✅ IMPORTAR SERVICIO DE RECETAS
+        from configuraciones_service import ConfiguracionesService  # ✅ IMPORTAR SERVICIO DE CONFIGURACIONES
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
         self.recetas_service = RecetasService()  # ✅ INICIALIZAR SERVICIO DE RECETAS
+        self.config_service = ConfiguracionesService()  # ✅ INICIALIZAR SERVICIO DE CONFIGURACIONES
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
@@ -946,7 +950,9 @@ class RestauranteGUI:
         self.vista_admin = None
         self.vista_inventario = None
         self.vista_recetas = None  # ✅ AGREGAR ESTO
+        self.vista_configuraciones = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
+        
 
     def main(self, page: ft.Page):
         self.page = page
@@ -981,6 +987,7 @@ class RestauranteGUI:
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
         self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE RECETAS
+        self.vista_configuraciones = crear_vista_configuraciones(self.config_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE CONFIGURACIONES
 
         tabs = ft.Tabs(
             selected_index=0,
@@ -1015,6 +1022,11 @@ class RestauranteGUI:
                     text="Recetas",
                     icon=ft.Icons.BOOK,
                     content=self.vista_recetas
+                ),
+                ft.Tab(  # ✅ PESTAÑA DE CONFIGURACIONES
+                    text="Configuraciones",
+                    icon=ft.Icons.SETTINGS,
+                    content=self.vista_configuraciones
                 ),
             ],
             expand=1
