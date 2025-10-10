@@ -1,15 +1,19 @@
 import json
-from typing import List, Dict, Any
+import os
 from pathlib import Path
+from typing import List, Dict, Any
 
 class ConfiguracionesService:
-    def __init__(self, archivo: str = "configuraciones.json", inventario_service=None):
-        self.archivo = archivo
-        self.inventario_service = inventario_service  # ✅ AGREGAR SERVICIO DE INVENTARIO
+    def __init__(self, inventario_service=None):
+        # ✅ GUARDAR EN CARPETA LOCAL DEL USUARIO
+        self.carpeta_datos = Path.home() / ".restaurantia" / "datos"
+        self.carpeta_datos.mkdir(parents=True, exist_ok=True)
+        self.archivo = self.carpeta_datos / "configuraciones.json"
+        self.inventario_service = inventario_service
         self._crear_archivo_si_no_existe()
 
     def _crear_archivo_si_no_existe(self):
-        if not Path(self.archivo).exists():
+        if not self.archivo.exists():
             with open(self.archivo, "w", encoding="utf-8") as f:
                 json.dump({"configuraciones": []}, f, ensure_ascii=False, indent=4)
 

@@ -1,5 +1,7 @@
 import flet as ft
 from typing import List, Dict, Any
+import threading
+import time
 
 def crear_vista_inventario(inventory_service, on_update_ui, page):
     # ✅ SECCIÓN DE ALERTAS - AQUÍ SE MOSTRARÁN LOS AVISOS
@@ -28,6 +30,51 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         auto_scroll=True,
     )
 
+    # ✅ FUNCIÓN PARA VERIFICAR ALERTAS PERIÓDICAMENTE
+    def verificar_alertas_periodicamente():
+        while True:
+            try:
+                items = inventory_service.obtener_inventario()
+                
+                # ✅ VERIFICAR ALERTAS DE INGREDIENTES BAJOS
+                umbral_bajo = 5  # ✅ UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
+                ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
+
+                # ✅ MOSTRAR ALERTA SI HAY INGREDIENTES BAJOS
+                if ingredientes_bajos:
+                    nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
+                    
+                    # ✅ MOSTRAR VENTANA MODAL DE ALERTA
+                    def cerrar_alerta(e):
+                        page.close(dlg_alerta)
+                    
+                    dlg_alerta = ft.AlertDialog(
+                        title=ft.Text("⚠️ Alerta de Inventario"),
+                        content=ft.Text(f"Los siguientes ingredientes están por debajo del umbral:\n\n{nombres_bajos}\n\nCantidad mínima: {umbral_bajo}"),
+                        actions=[
+                            ft.TextButton("Aceptar", on_click=cerrar_alerta)
+                        ],
+                        actions_alignment=ft.MainAxisAlignment.END,
+                    )
+                    
+                    # ✅ MOSTRAR ALERTA EN EL HILO PRINCIPAL
+                    def mostrar_alerta():
+                        page.dialog = dlg_alerta
+                        dlg_alerta.open = True
+                        page.update()
+                    
+                    # ✅ EJECUTAR EN EL HILO PRINCIPAL
+                    page.run_thread(mostrar_alerta)
+                
+                time.sleep(30)  # ✅ VERIFICAR CADA 30 SEGUNDOS
+            except Exception as e:
+                print(f"Error en verificación periódica: {e}")
+                time.sleep(30)  # ✅ ESPERAR 30 SEGUNDOS ANTES DE REINTENTAR
+
+    # ✅ INICIAR VERIFICACIÓN PERIÓDICA EN UN HILO SEPARADO
+    hilo_verificacion = threading.Thread(target=verificar_alertas_periodicamente, daemon=True)
+    hilo_verificacion.start()
+
     def actualizar_lista():
         try:
             items = inventory_service.obtener_inventario()
@@ -37,7 +84,7 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
             umbral_bajo = 5  # ✅ UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
             ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
 
-            # ✅ MOSTRAR ALERTA SI HAY INGREDIENTES BAJOS
+            # ✅ MOSTRAR ALERTA EN LA INTERFAZ
             if ingredientes_bajos:
                 nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
                 alertas.content.value = f"⚠️ Alerta: {nombres_bajos} están por debajo del umbral ({umbral_bajo})"
