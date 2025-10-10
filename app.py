@@ -422,19 +422,32 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             return
 
         try:
-            backend_service.eliminar_ultimo_item(pedido_actual["id"])
-            
-            pedidos_activos = backend_service.obtener_pedidos_activos()
-            pedido_actualizado = next((p for p in pedidos_activos if p["id"] == pedido_actual["id"]), None)
-            
-            if pedido_actualizado:
-                estado["pedido_actual"] = pedido_actualizado
-                resumen = generar_resumen_pedido(pedido_actualizado)
-                resumen_pedido.value = resumen
+            if pedido_actual["id"] is None:
+                # ✅ SOLO ACTUALIZAR EN MEMORIA (NO TIENE ID)
+                items = pedido_actual.get("items", [])
+                if items:
+                    items.pop()
+                    pedido_actual["items"] = items
+                    estado["pedido_actual"] = pedido_actual
+                    resumen = generar_resumen_pedido(pedido_actual)
+                    resumen_pedido.value = resumen
+                else:
+                    resumen_pedido.value = "Sin items."
             else:
-                resumen_pedido.value = "Sin items."
-                estado["pedido_actual"] = None
+                # ✅ SI TIENE ID, ELIMINAR EN LA BASE DE DATOS
+                backend_service.eliminar_ultimo_item(pedido_actual["id"])
                 
+                pedidos_activos = backend_service.obtener_pedidos_activos()
+                pedido_actualizado = next((p for p in pedidos_activos if p["id"] == pedido_actual["id"]), None)
+                
+                if pedido_actualizado:
+                    estado["pedido_actual"] = pedido_actualizado
+                    resumen = generar_resumen_pedido(pedido_actualizado)
+                    resumen_pedido.value = resumen
+                else:
+                    resumen_pedido.value = "Sin items."
+                    estado["pedido_actual"] = None
+                    
             on_update_ui()
             actualizar_estado_botones()
             
