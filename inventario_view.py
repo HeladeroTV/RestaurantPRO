@@ -1,11 +1,5 @@
-# === INVENTARIO_VIEW.PY ===
-# Vista de Flet para gestionar el inventario de productos del restaurante.
-
 import flet as ft
 from typing import List, Dict, Any
-
-# === FUNCIÓN: crear_vista_inventario ===
-# Crea la vista de inventario con controles para agregar, editar y eliminar productos.
 
 def crear_vista_inventario(inventory_service, on_update_ui, page):
     # ✅ SECCIÓN DE ALERTAS - AQUÍ SE MOSTRARÁN LOS AVISOS

@@ -18,6 +18,7 @@ from recetas_view import crear_vista_recetas
 from configuraciones_view import crear_vista_configuraciones
 
 
+
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
 
@@ -987,7 +988,12 @@ class RestauranteGUI:
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
         self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE RECETAS
-        self.vista_configuraciones = crear_vista_configuraciones(self.config_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE CONFIGURACIONES
+        self.vista_configuraciones = crear_vista_configuraciones(
+            self.config_service,          # ✅ SERVICIO DE CONFIGURACIONES
+            self.inventory_service,       # ✅ SERVICIO DE INVENTARIO
+            self.actualizar_ui_completo,  # ✅ FUNCIÓN DE ACTUALIZACIÓN
+            page                          # ✅ OBJETO DE PÁGINA
+        )  # ✅ CREAR VISTA DE CONFIGURACIONES
 
         tabs = ft.Tabs(
             selected_index=0,

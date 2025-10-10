@@ -1,7 +1,7 @@
 import flet as ft
 from typing import List, Dict, Any
 
-def crear_vista_configuraciones(config_service, on_update_ui, page):
+def crear_vista_configuraciones(config_service, inventory_service, on_update_ui, page):  # ✅ AGREGAR INVENTORY_SERVICE
     # Campos de entrada
     nombre_input = ft.TextField(label="Nombre de la configuración", width=300)
     descripcion_input = ft.TextField(label="Descripción", multiline=True, width=300)
@@ -33,13 +33,39 @@ def crear_vista_configuraciones(config_service, on_update_ui, page):
     # Lista de ingredientes de la configuración
     lista_ingredientes = ft.Column(spacing=5)
 
-    # Lista de configuraciones
-    lista_configuraciones = ft.ListView(
-        expand=1,
-        spacing=10,
-        padding=20,
-        auto_scroll=True,
-    )
+    # Lista de configuraciones guardadas
+    lista_configuraciones_guardadas = ft.Column(spacing=10)
+
+    def aplicar_configuracion_click(config_id: int):
+        try:
+            configs = config_service.obtener_configuraciones()
+            config = next((c for c in configs if c["id"] == config_id), None)
+            if not config:
+                return
+
+            # ✅ APLICAR INGREDIENTES AL INVENTARIO DIRECTAMENTE
+            for ing in config["ingredientes"]:
+                try:
+                    # ✅ AGREGAR INGREDIENTE AL INVENTARIO
+                    inventory_service.agregar_item_inventario(
+                        nombre=ing["nombre"],
+                        cantidad=ing["cantidad"],
+                        unidad=ing["unidad"]
+                    )
+                except Exception as e:
+                    print(f"Error al agregar ingrediente {ing['nombre']}: {e}")
+
+            on_update_ui()
+        except Exception as ex:
+            print(f"Error al aplicar configuración: {ex}")
+
+    def eliminar_configuracion_click(config_id: int):
+        try:
+            config_service.eliminar_configuracion(config_id)
+            actualizar_lista_configuraciones_guardadas()  # ✅ ACTUALIZAR LISTA
+            on_update_ui()
+        except Exception as ex:
+            print(f"Error al eliminar configuración: {ex}")
 
     def agregar_ingrediente_click(e):
         nombre_ing = nombre_ingrediente_input.value
@@ -99,59 +125,50 @@ def crear_vista_configuraciones(config_service, on_update_ui, page):
             nombre_ingrediente_input.value = ""
             cantidad_input.value = ""
             lista_ingredientes.controls.clear()
+            actualizar_lista_configuraciones_guardadas()  # ✅ ACTUALIZAR LISTA
             on_update_ui()
         except Exception as ex:
             print(f"Error al crear configuración: {ex}")
 
-    def aplicar_configuracion_click(config_id: int):
-        try:
-            config_service.aplicar_configuracion(config_id)
-            on_update_ui()
-        except Exception as ex:
-            print(f"Error al aplicar configuración: {ex}")
-
-    def actualizar_lista():
+    def actualizar_lista_configuraciones_guardadas():
         try:
             configs = config_service.obtener_configuraciones()
-            lista_configuraciones.controls.clear()
+            lista_configuraciones_guardadas.controls.clear()
             for config in configs:
                 item_row = ft.Container(
                     content=ft.Column([
-                        ft.Text(f"{config['nombre']}", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Row([
+                            ft.Text(f"{config['nombre']}", size=18, weight=ft.FontWeight.BOLD),
+                            ft.IconButton(
+                                icon=ft.Icons.DELETE,
+                                on_click=lambda e, id=config['id']: eliminar_configuracion_click(id),
+                                tooltip="Eliminar configuración",
+                                icon_color=ft.Colors.RED_700
+                            )
+                        ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                         ft.Text(f"Descripción: {config['descripcion']}", size=14),
                         ft.Text("Ingredientes:", size=14, weight=ft.FontWeight.BOLD),
                         ft.Column([
                             ft.Text(f"- {ing['nombre']}: {ing['cantidad']} {ing['unidad']}")
                             for ing in config['ingredientes']
                         ]),
-                        ft.Row([
-                            ft.ElevatedButton(
-                                "Aplicar",
-                                on_click=lambda e, id=config['id']: aplicar_configuracion_click(id),
-                                style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-                            ),
-                            ft.ElevatedButton(
-                                "Eliminar",
-                                on_click=lambda e, id=config['id']: eliminar_configuracion_click(id),
-                                style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
-                            )
-                        ])
+                        ft.ElevatedButton(
+                            "Aplicar configuración",
+                            on_click=lambda e, id=config['id']: aplicar_configuracion_click(id),
+                            style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
+                        )
                     ]),
                     bgcolor=ft.Colors.BLUE_GREY_900,
                     padding=10,
                     border_radius=10
                 )
-                lista_configuraciones.controls.append(item_row)
+                lista_configuraciones_guardadas.controls.append(item_row)
             page.update()
         except Exception as e:
             print(f"Error al cargar configuraciones: {e}")
 
-    def eliminar_configuracion_click(config_id: int):
-        try:
-            config_service.eliminar_configuracion(config_id)
-            on_update_ui()
-        except Exception as ex:
-            print(f"Error al eliminar configuración: {ex}")
+    # ✅ CARGAR CONFIGURACIONES AL INICIAR
+    actualizar_lista_configuraciones_guardadas()
 
     vista = ft.Container(
         content=ft.Column([
@@ -184,12 +201,12 @@ def crear_vista_configuraciones(config_service, on_update_ui, page):
                 style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
             ),
             ft.Divider(),
-            ft.Text("Configuraciones registradas", size=18, weight=ft.FontWeight.BOLD),
-            lista_configuraciones
+            ft.Text("Configuraciones guardadas", size=18, weight=ft.FontWeight.BOLD),
+            lista_configuraciones_guardadas  # ✅ LISTA DE CONFIGURACIONES
         ]),
         padding=20,
         expand=True
     )
 
-    vista.actualizar_lista = actualizar_lista
+    vista.actualizar_lista_configuraciones_guardadas = actualizar_lista_configuraciones_guardadas  # ✅ AGREGAR FUNCIÓN
     return vista
