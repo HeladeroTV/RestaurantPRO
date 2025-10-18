@@ -6,12 +6,12 @@ import time
 def crear_vista_inventario(inventory_service, on_update_ui, page):
     # ✅ SECCIÓN DE ALERTAS - AQUÍ SE MOSTRARÁN LOS AVISOS
     alertas = ft.Container(
-        content=ft.Text("", color=ft.Colors.RED_700, weight=ft.FontWeight.BOLD),
-        bgcolor=ft.Colors.AMBER_100,
-        padding=10,
-        border_radius=5,
-        visible=False  # ✅ OCULTAR SI NO HAY ALERTAS
-    )
+    content=ft.Text("", color=ft.Colors.WHITE, weight=ft.FontWeight.BOLD),
+    bgcolor=ft.Colors.RED_700,
+    padding=10,
+    border_radius=5,
+    visible=False  # ✅ OCULTAR SI NO HAY ALERTAS
+)
 
     # Campos de entrada
     nombre_input = ft.TextField(label="Nombre del producto", width=300)

@@ -20,6 +20,8 @@ from reportes_view import crear_vista_reportes
 
 
 
+
+
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
 
@@ -951,12 +953,12 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
 class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
-        from recetas_service import RecetasService  # ✅ IMPORTAR SERVICIO DE RECETAS
-        from configuraciones_service import ConfiguracionesService  # ✅ IMPORTAR SERVICIO DE CONFIGURACIONES
+        from recetas_service import RecetasService
+        from configuraciones_service import ConfiguracionesService
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
-        self.recetas_service = RecetasService()  # ✅ INICIALIZAR SERVICIO DE RECETAS
-        self.config_service = ConfiguracionesService()  # ✅ INICIALIZAR SERVICIO DE CONFIGURACIONES
+        self.recetas_service = RecetasService()
+        self.config_service = ConfiguracionesService()
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
@@ -964,10 +966,29 @@ class RestauranteGUI:
         self.vista_caja = None
         self.vista_admin = None
         self.vista_inventario = None
-        self.vista_recetas = None  # ✅ AGREGAR ESTO
-        self.vista_configuraciones = None  # ✅ AGREGAR ESTO
-        self.menu_cache = None
+        self.vista_recetas = None
+        self.vista_configuraciones = None
         self.vista_reportes = None
+        self.vista_personalizacion = None  # ✅ AGREGAR ESTO
+        self.menu_cache = None
+        self.hilo_sincronizacion = None
+        
+    
+    def iniciar_sincronizacion(self):
+        """Inicia la sincronización automática en segundo plano."""
+        def actualizar_periodicamente():
+            while True:
+                try:
+                    # ✅ ACTUALIZAR INTERFAZ CADA 3 SEGUNDOS
+                    self.actualizar_ui_completo()
+                    time.sleep(3)  # ✅ INTERVALO DE ACTUALIZACIÓN
+                except Exception as e:
+                    print(f"Error en sincronización: {e}")
+                    time.sleep(3)
+
+        # ✅ INICIAR HILO DE SINCRONIZACIÓN
+        self.hilo_sincronizacion = threading.Thread(target=actualizar_periodicamente, daemon=True)
+        self.hilo_sincronizacion.start()
         
 
     def main(self, page: ft.Page):
@@ -1008,8 +1029,8 @@ class RestauranteGUI:
             self.inventory_service,
             self.actualizar_ui_completo,
             page
-        )  # ✅ CREAR VISTA DE CONFIGURACIONES
-        self.vista_reportes = crear_vista_reportes(self.backend_service, self.actualizar_ui_completo, page)  # ✅ CREAR VISTA DE REPORTES
+        )
+        self.vista_reportes = crear_vista_reportes(self.backend_service, self.actualizar_ui_completo, page)
 
         tabs = ft.Tabs(
             selected_index=0,
@@ -1050,7 +1071,7 @@ class RestauranteGUI:
                     icon=ft.Icons.SETTINGS,
                     content=self.vista_configuraciones
                 ),
-                ft.Tab(  # ✅ PESTAÑA DE REPORTES
+                ft.Tab(
                     text="Reportes",
                     icon=ft.Icons.ANALYTICS,
                     content=self.vista_reportes
@@ -1076,7 +1097,8 @@ class RestauranteGUI:
             )
         )
 
-        # ✅ LLAMAR A on_update_ui() AL INICIO PARA CARGAR DATOS
+        # ✅ INICIAR SINCRONIZACIÓN AUTOMÁTICA
+        self.iniciar_sincronizacion()
         self.actualizar_ui_completo()
 
     def crear_vista_mesera(self):
