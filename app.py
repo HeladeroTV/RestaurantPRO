@@ -630,6 +630,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
 # === FUNCIÓN: crear_vista_caja ===
 # Vista de caja para gestionar pagos y eliminar pedidos.
 
+# Dentro de crear_vista_caja
 def crear_vista_caja(backend_service, on_update_ui, page):
     lista_cuentas = ft.ListView(
         expand=1,
@@ -637,6 +638,9 @@ def crear_vista_caja(backend_service, on_update_ui, page):
         padding=20,
         auto_scroll=True,
     )
+
+    # Diccionario para almacenar temporalmente el estado de pago y cambio por ID de pedido
+    estados_pago = {}
 
     def actualizar():
         try:
@@ -655,13 +659,18 @@ def crear_vista_caja(backend_service, on_update_ui, page):
     def crear_item_cuenta(pedido, backend_service, on_update_ui, page):
         total_pedido = sum(item["precio"] for item in pedido["items"])
 
-        # ✅ CAMPOS PARA PAGO Y CAMBIO
+        # Recuperar o inicializar el estado de pago para este pedido
+        id_pedido = pedido["id"]
+        estado_pago = estados_pago.get(id_pedido, {"pago_cliente_valor": "", "cambio_valor": "Cambio: $0.00"})
+
+        # ✅ CAMPOS PARA PAGO Y CAMBIO - Inicializar con valores guardados
         pago_cliente = ft.TextField(
             label="Con cuánto paga",
             input_filter=ft.NumbersOnlyInputFilter(),
-            width=200
+            width=200,
+            value=estado_pago["pago_cliente_valor"] # <-- Inicializar con el valor anterior
         )
-        cambio_text = ft.Text("Cambio: $0.00", size=14, weight=ft.FontWeight.BOLD)
+        cambio_text = ft.Text(estado_pago["cambio_valor"], size=14, weight=ft.FontWeight.BOLD) # <-- Inicializar con el cambio anterior
 
         # ✅ DROPDOWN PARA MÉTODO DE PAGO
         metodo_pago = ft.Dropdown(
@@ -682,14 +691,21 @@ def crear_vista_caja(backend_service, on_update_ui, page):
                     return
                 cambio = pago - total_pedido
                 cambio_text.value = f"Cambio: ${cambio:.2f}"
+                # Guardar el estado actual
+                estados_pago[id_pedido] = {
+                    "pago_cliente_valor": pago_cliente.value,
+                    "cambio_valor": cambio_text.value
+                }
                 page.update()
             except ValueError:
-                pass
+                pass # Si el valor no es un número, no hace nada
 
         def terminar_pedido(e):
             try:
                 # ✅ CAMBIAR ESTADO A "Entregado" EN LUGAR DE "Pagado"
                 backend_service.actualizar_estado_pedido(pedido["id"], "Entregado")
+                # Limpiar el estado de pago asociado a este pedido si se termina
+                estados_pago.pop(id_pedido, None)
                 on_update_ui()
             except Exception as ex:
                 print(f"Error al terminar pedido: {ex}")
@@ -698,6 +714,8 @@ def crear_vista_caja(backend_service, on_update_ui, page):
             try:
                 # Eliminar pedido del backend
                 backend_service.eliminar_pedido(pedido["id"])
+                # Limpiar el estado de pago asociado a este pedido si se elimina
+                estados_pago.pop(id_pedido, None)
                 on_update_ui()
             except Exception as ex:
                 print(f"Error al eliminar pedido: {ex}")
@@ -705,6 +723,7 @@ def crear_vista_caja(backend_service, on_update_ui, page):
         origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
         cliente_id = "Cliente App"
 
+        # Asociar el ID del pedido al contenedor para poder limpiar el estado si es necesario
         return ft.Container(
             content=ft.Column([
                 ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
@@ -750,7 +769,6 @@ def crear_vista_caja(backend_service, on_update_ui, page):
         ]),
         expand=True
     )
-
     vista.actualizar = actualizar
     return vista
 
