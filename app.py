@@ -1,6 +1,5 @@
 # === APP.PY ===
 # Módulo principal de la interfaz gráfica del sistema de restaurante usando Flet.
-
 import flet as ft
 from typing import Optional, Callable, List, Dict, Any
 from datetime import datetime
@@ -10,21 +9,16 @@ import requests
 import winsound
 import time as time_module
 
-
-# IMPORTAR LAS NUEVAS CLASES DE INVENTARIO
+# IMPORTAR LAS NUEVAS CLASES DE INVENTARIO Y LA NUEVA VISTA DE CAJA
 from inventario_view import crear_vista_inventario
 from inventario_service import InventoryService
 from recetas_view import crear_vista_recetas
 from configuraciones_view import crear_vista_configuraciones
 from reportes_view import crear_vista_reportes
-
-
-
-
+from caja_view import crear_vista_caja # <-- IMPORTAR LA NUEVA VISTA DE CAJA
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
-
 def reproducir_sonido_pedido():
     try:
         # Melodía: Do - Mi - Sol
@@ -37,11 +31,9 @@ def reproducir_sonido_pedido():
 
 # === FUNCIÓN: generar_resumen_pedido ===
 # Genera un texto resumen del pedido actual con items y total.
-
 def generar_resumen_pedido(pedido):
     if not pedido.get("items"):
         return "Sin items."
-    
     total = sum(item["precio"] for item in pedido["items"])
     items_str = "\n".join(f"- {item['nombre']} (${item['precio']:.2f})" for item in pedido["items"])
     titulo = obtener_titulo_pedido(pedido)
@@ -49,7 +41,6 @@ def generar_resumen_pedido(pedido):
 
 # === FUNCIÓN: obtener_titulo_pedido ===
 # Genera el título del pedido dependiendo si es de mesa o app.
-
 def obtener_titulo_pedido(pedido):
     if pedido.get("mesa_numero") == 99 and pedido.get("numero_app"):
         return f"Digital #{pedido['numero_app']:03d}"  # ✅ CAMBIAR A "Digital"
@@ -58,25 +49,21 @@ def obtener_titulo_pedido(pedido):
 
 # === FUNCIÓN: crear_selector_item ===
 # Crea un selector con dropdowns para filtrar y elegir items del menú.
-
 def crear_selector_item(menu):
     tipos = list(set(item["tipo"] for item in menu))
     tipos.sort()
-
     tipo_dropdown = ft.Dropdown(
         label="Tipo de item",
         options=[ft.dropdown.Option(tipo) for tipo in tipos],
         value=tipos[0] if tipos else "Entradas",
         width=200,
     )
-
     search_field = ft.TextField(
         label="Buscar ítem...",
         prefix_icon=ft.Icons.SEARCH,
         width=200,
         hint_text="Escribe para filtrar..."
     )
-
     items_dropdown = ft.Dropdown(
         label="Seleccionar item",
         width=200,
@@ -85,12 +72,10 @@ def crear_selector_item(menu):
     def filtrar_items(e):
         query = search_field.value.lower().strip() if search_field.value else ""
         tipo_actual = tipo_dropdown.value
-
         if query:
             items_filtrados = [item for item in menu if query in item["nombre"].lower()]
         else:
             items_filtrados = [item for item in menu if item["tipo"] == tipo_actual]
-
         items_dropdown.options = [ft.dropdown.Option(item["nombre"]) for item in items_filtrados]
         items_dropdown.value = None
         if e and e.page:
@@ -101,7 +86,6 @@ def crear_selector_item(menu):
 
     tipo_dropdown.on_change = actualizar_items
     search_field.on_change = filtrar_items
-
     actualizar_items(None)
 
     container = ft.Column([
@@ -113,7 +97,7 @@ def crear_selector_item(menu):
     container.tipo_dropdown = tipo_dropdown
     container.search_field = search_field
     container.items_dropdown = items_dropdown
-    
+
     def get_selected_item():
         tipo = tipo_dropdown.value
         nombre = items_dropdown.value
@@ -122,18 +106,16 @@ def crear_selector_item(menu):
                 if item["nombre"] == nombre and item["tipo"] == tipo:
                     return item
         return None
-    
+
     container.get_selected_item = get_selected_item
     return container
 
 # === FUNCIÓN: crear_mesas_grid ===
 # Genera una cuadrícula visual de mesas físicas y una mesa virtual para pedidos app.
-
 def crear_mesas_grid(backend_service, on_select):
     try:
         # Obtener el estado real de las mesas del backend
         mesas_backend = backend_service.obtener_mesas()
-        
         # Si el backend no tiene mesas, usar valores por defecto
         if not mesas_backend:
             mesas_fisicas = [
@@ -157,7 +139,7 @@ def crear_mesas_grid(backend_service, on_select):
             {"numero": 5, "capacidad": 6, "ocupada": False},
             {"numero": 6, "capacidad": 6, "ocupada": False},
         ]
-    
+
     grid = ft.GridView(
         expand=1,
         runs_count=2,
@@ -171,10 +153,8 @@ def crear_mesas_grid(backend_service, on_select):
     for mesa in mesas_fisicas:
         if mesa["numero"] == 99:
             continue
-            
         color = ft.Colors.GREEN_700 if not mesa["ocupada"] else ft.Colors.RED_700
         estado = "LIBRE" if not mesa["ocupada"] else "OCUPADA"
-
         grid.controls.append(
             ft.Container(
                 key=f"mesa-{mesa['numero']}",
@@ -219,7 +199,6 @@ def crear_mesas_grid(backend_service, on_select):
             ft.Text("Siempre disponible", size=10, color=ft.Colors.WHITE),
         ]
     )
-
     grid.controls.append(
         ft.Container(
             key="mesa-99",
@@ -238,17 +217,14 @@ def crear_mesas_grid(backend_service, on_select):
 
 # === FUNCIÓN: crear_panel_gestion ===
 # Crea el panel lateral para gestionar pedidos de una mesa seleccionada.
-
 def crear_panel_gestion(backend_service, menu, on_update_ui, page):
     estado = {"mesa_seleccionada": None, "pedido_actual": None}
-
     mesa_info = ft.Text("", size=16, weight=ft.FontWeight.BOLD)
     tamaño_grupo_input = ft.TextField(
         label="Tamaño del grupo",
         input_filter=ft.NumbersOnlyInputFilter(),
         prefix_icon=ft.Icons.PEOPLE
     )
-
     # Campo de texto para la nota
     nota_pedido = ft.TextField(
         label="Notas del pedido",
@@ -257,48 +233,52 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         hint_text="Ej: Sin cebolla, sin salsa, etc.",
         width=400
     )
-
     selector_item = crear_selector_item(menu)
+
+    # --- NUEVO: Selector de Cantidad ---
+    cantidad_dropdown = ft.Dropdown(
+        label="Cantidad",
+        options=[ft.dropdown.Option(i) for i in range(1, 11)], # Opciones del 1 al 10
+        value="1", # Valor por defecto
+        width=100,
+        disabled=True # Se habilita cuando se selecciona un ítem
+    )
+    # --- FIN NUEVO ---
 
     asignar_btn = ft.ElevatedButton(
         text="Asignar Cliente",
         disabled=True,
         style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
     )
-
     agregar_item_btn = ft.ElevatedButton(
         text="Agregar Item",
         disabled=True,
         style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE)
     )
-
     eliminar_ultimo_btn = ft.ElevatedButton(
         text="Eliminar último ítem",
         disabled=True,
         style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
     )
-
     # Nuevo botón: Confirmar Pedido
     confirmar_pedido_btn = ft.ElevatedButton(
         text="Confirmar Pedido",
         disabled=True,
         style=ft.ButtonStyle(bgcolor=ft.Colors.AMBER_700, color=ft.Colors.WHITE)
     )
-
-    
-
     resumen_pedido = ft.Text("", size=14)
 
     def actualizar_estado_botones():
         mesa_seleccionada = estado["mesa_seleccionada"]
         pedido_actual = estado["pedido_actual"]
-        
         if not mesa_seleccionada:
             asignar_btn.disabled = True
             agregar_item_btn.disabled = True
             eliminar_ultimo_btn.disabled = True
             confirmar_pedido_btn.disabled = True
-            
+            # --- ACTUALIZACIÓN: Deshabilitar selector de cantidad ---
+            cantidad_dropdown.disabled = True
+            # --- FIN ACTUALIZACIÓN ---
             return
 
         if mesa_seleccionada.get("numero") == 99:
@@ -306,15 +286,32 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             agregar_item_btn.disabled = pedido_actual is None
             eliminar_ultimo_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
             confirmar_pedido_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
-            
+            # --- ACTUALIZACIÓN: Habilitar selector de cantidad si hay un pedido ---
+            cantidad_dropdown.disabled = pedido_actual is None or selector_item.get_selected_item() is None
+            # --- FIN ACTUALIZACIÓN ---
         else:
             asignar_btn.disabled = mesa_seleccionada.get("ocupada", False)
             agregar_item_btn.disabled = pedido_actual is None
             eliminar_ultimo_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
             confirmar_pedido_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
-            
-
+            # --- ACTUALIZACIÓN: Habilitar selector de cantidad si hay un pedido ---
+            cantidad_dropdown.disabled = pedido_actual is None or selector_item.get_selected_item() is None
+            # --- FIN ACTUALIZACIÓN ---
         page.update()
+
+    # --- ACTUALIZACIÓN: Función para manejar cambio en selector de ítem ---
+    def on_item_selected(e):
+        # Habilitar el selector de cantidad solo si hay un ítem seleccionado y un pedido actual
+        if estado["pedido_actual"] and selector_item.get_selected_item():
+            cantidad_dropdown.disabled = False
+        else:
+            cantidad_dropdown.disabled = True
+        page.update()
+
+    # Asignar la función al cambio de selección en el dropdown de ítems
+    selector_item.items_dropdown.on_change = on_item_selected
+    # --- FIN ACTUALIZACIÓN ---
+
 
     def seleccionar_mesa_interna(numero_mesa):
         try:
@@ -322,19 +319,19 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             mesa_seleccionada = next((m for m in mesas if m["numero"] == numero_mesa), None)
             estado["mesa_seleccionada"] = mesa_seleccionada
             estado["pedido_actual"] = None
-            
             if not mesa_seleccionada:
                 return
-
             if mesa_seleccionada["numero"] == 99:
                 mesa_info.value = "Digital - Pedidos por aplicación móvil"  # ✅ CAMBIAR A "Digital"
             else:
                 mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
-
             resumen_pedido.value = ""
             nota_pedido.value = ""
+            # --- ACTUALIZACIÓN: Reiniciar selector de cantidad ---
+            cantidad_dropdown.value = "1"
+            cantidad_dropdown.disabled = True
+            # --- FIN ACTUALIZACIÓN ---
             actualizar_estado_botones()
-            
         except Exception as e:
             pass
 
@@ -342,7 +339,6 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         mesa_seleccionada = estado["mesa_seleccionada"]
         if not mesa_seleccionada:
             return
-
         try:
             # ✅ CREAR PEDIDO EN MEMORIA (NO EN BASE DE DATOS AÚN)
             nuevo_pedido = {
@@ -354,48 +350,59 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                 "numero_app": None,
                 "notas": nota_pedido.value
             }
-
             estado["pedido_actual"] = nuevo_pedido
             resumen_pedido.value = ""
+            # --- ACTUALIZACIÓN: Habilitar selector de cantidad ---
+            cantidad_dropdown.disabled = selector_item.get_selected_item() is None
+            # --- FIN ACTUALIZACIÓN ---
             on_update_ui()
             actualizar_estado_botones()
-            
         except Exception as ex:
             print(f"Error asignar cliente: {ex}")
 
     def agregar_item_pedido(e):
         mesa_seleccionada = estado["mesa_seleccionada"]
         pedido_actual = estado["pedido_actual"]
-        
         if not mesa_seleccionada or not pedido_actual:
             return
-
         item = selector_item.get_selected_item()
         if not item:
             return
+
+        # --- OBTENER CANTIDAD SELECCIONADA ---
+        try:
+            cantidad = int(cantidad_dropdown.value)
+            if cantidad < 1:
+                cantidad = 1 # Asegurar al menos 1
+        except ValueError:
+            cantidad = 1 # Valor por defecto si hay error
+        # --- FIN OBTENER CANTIDAD ---
 
         try:
             # ✅ SOLO ACTUALIZAR EN MEMORIA SI AÚN NO TIENE ID
             if pedido_actual["id"] is None:
                 items_actuales = pedido_actual.get("items", [])
-                items_actuales.append({
-                    "nombre": item["nombre"],
-                    "precio": item["precio"],
-                    "tipo": item["tipo"],
-                    "cantidad": 1
-                })
+                # Agregar el ítem 'cantidad' veces
+                for _ in range(cantidad):
+                    items_actuales.append({
+                        "nombre": item["nombre"],
+                        "precio": item["precio"],
+                        "tipo": item["tipo"],
+                        "cantidad": 1 # Cada ítem individual tiene cantidad 1
+                    })
                 pedido_actual["items"] = items_actuales
                 estado["pedido_actual"] = pedido_actual
             else:
                 # ✅ SI YA TIENE ID, ACTUALIZAR EN LA BASE DE DATOS
                 items_actuales = pedido_actual.get("items", [])
-                items_actuales.append({
-                    "nombre": item["nombre"],
-                    "precio": item["precio"],
-                    "tipo": item["tipo"],
-                    "cantidad": 1
-                })
-                
+                # Agregar el ítem 'cantidad' veces
+                for _ in range(cantidad):
+                    items_actuales.append({
+                        "nombre": item["nombre"],
+                        "precio": item["precio"],
+                        "tipo": item["tipo"],
+                        "cantidad": 1 # Cada ítem individual tiene cantidad 1
+                    })
                 # Actualizar el pedido en el backend
                 resultado = backend_service.actualizar_pedido(
                     pedido_actual["id"],
@@ -404,17 +411,19 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                     pedido_actual["estado"],
                     pedido_actual.get("notas", "")
                 )
-                
                 # Actualizar el pedido localmente
                 pedido_actual["items"] = items_actuales
                 estado["pedido_actual"] = pedido_actual
-                
+
+            # Reiniciar el selector de cantidad a 1 después de agregar
+            cantidad_dropdown.value = "1"
+            cantidad_dropdown.disabled = selector_item.get_selected_item() is None # Deshabilitar si no hay ítem seleccionado
+
             # Actualizar resumen
             resumen = generar_resumen_pedido(pedido_actual)
             resumen_pedido.value = resumen
             on_update_ui()
             actualizar_estado_botones()
-            
         except Exception as ex:
             print(f"Error al agregar ítem: {ex}")
 
@@ -422,13 +431,12 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         pedido_actual = estado["pedido_actual"]
         if not pedido_actual:
             return
-
         try:
             if pedido_actual["id"] is None:
                 # ✅ SOLO ACTUALIZAR EN MEMORIA (NO TIENE ID)
                 items = pedido_actual.get("items", [])
                 if items:
-                    items.pop()
+                    items.pop() # Elimina el último ítem agregado (independientemente de la cantidad)
                     pedido_actual["items"] = items
                     estado["pedido_actual"] = pedido_actual
                     resumen = generar_resumen_pedido(pedido_actual)
@@ -437,11 +445,11 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                     resumen_pedido.value = "Sin items."
             else:
                 # ✅ SI TIENE ID, ELIMINAR EN LA BASE DE DATOS
+                # OJO: Esto elimina el último ítem agregado, no necesariamente una "unidad" de un ítem repetido
+                # Para eliminar unidades específicas, se necesitaría una lógica más compleja en el backend
                 backend_service.eliminar_ultimo_item(pedido_actual["id"])
-                
                 pedidos_activos = backend_service.obtener_pedidos_activos()
                 pedido_actualizado = next((p for p in pedidos_activos if p["id"] == pedido_actual["id"]), None)
-                
                 if pedido_actualizado:
                     estado["pedido_actual"] = pedido_actualizado
                     resumen = generar_resumen_pedido(pedido_actualizado)
@@ -449,10 +457,8 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                 else:
                     resumen_pedido.value = "Sin items."
                     estado["pedido_actual"] = None
-                    
             on_update_ui()
             actualizar_estado_botones()
-            
         except Exception as ex:
             print(f"Error al eliminar ítem: {ex}")
 
@@ -460,13 +466,10 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         pedido_actual = estado["pedido_actual"]
         if not pedido_actual:
             return
-
         if not pedido_actual.get("items"):
             return  # ✅ No confirmar si no tiene ítems
-
         try:
             nota_a_guardar = nota_pedido.value.strip() if nota_pedido.value else ""  # ✅ ASEGURAR QUE NO SEA None
-
             if pedido_actual["id"] is None:
                 # ✅ ES UN NUEVO PEDIDO, CREARLO EN LA BASE DE DATOS
                 nuevo_pedido = backend_service.crear_pedido(
@@ -485,21 +488,19 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                     "Pendiente",
                     nota_a_guardar  # ✅ ENVIAR NOTA
                 )
-
+            # Reiniciar el selector de cantidad
+            cantidad_dropdown.value = "1"
+            cantidad_dropdown.disabled = True
             on_update_ui()  # ✅ ACTUALIZA LAS OTRAS PESTAÑAS
-
             # Reproducir sonido en un hilo separado para no bloquear la UI
             threading.Thread(target=reproducir_sonido_pedido, daemon=True).start()
-
         except Exception as ex:
             print(f"Error al confirmar pedido: {ex}")
 
-    
     asignar_btn.on_click = asignar_cliente
     agregar_item_btn.on_click = agregar_item_pedido
     eliminar_ultimo_btn.on_click = eliminar_ultimo_item
     confirmar_pedido_btn.on_click = confirmar_pedido
-    
 
     panel = ft.Container(
         content=ft.Column(
@@ -517,7 +518,13 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                 nota_pedido,
                 ft.Divider(),
                 selector_item,
-                agregar_item_btn,
+                # --- AÑADIR SELECTOR DE CANTIDAD A LA INTERFAZ ---
+                ft.Row([
+                    cantidad_dropdown, # Selector de cantidad
+                    ft.Text("   ", width=10), # Espaciado
+                    agregar_item_btn # Botón Agregar Item
+                ], alignment=ft.MainAxisAlignment.START), # Alinear al inicio
+                # --- FIN AÑADIR SELECTOR ---
                 eliminar_ultimo_btn,
                 confirmar_pedido_btn,
                 ft.Divider(),
@@ -536,13 +543,11 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         padding=20,
         expand=True
     )
-
     panel.seleccionar_mesa = seleccionar_mesa_interna
     return panel
 
 # === FUNCIÓN: crear_vista_cocina ===
 # Vista de cocina para ver y gestionar pedidos activos.
-
 def crear_vista_cocina(backend_service, on_update_ui, page):
     lista_pedidos = ft.ListView(
         expand=1,
@@ -623,179 +628,29 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
         padding=20,
         expand=True
     )
-
-    vista.actualizar = actualizar
-    return vista
-
-# === FUNCIÓN: crear_vista_caja ===
-# Vista de caja para gestionar pagos y eliminar pedidos.
-
-# Dentro de crear_vista_caja
-def crear_vista_caja(backend_service, on_update_ui, page):
-    lista_cuentas = ft.ListView(
-        expand=1,
-        spacing=10,
-        padding=20,
-        auto_scroll=True,
-    )
-
-    # Diccionario para almacenar temporalmente el estado de pago y cambio por ID de pedido
-    estados_pago = {}
-
-    def actualizar():
-        try:
-            pedidos = backend_service.obtener_pedidos_activos()
-            lista_cuentas.controls.clear()
-            for pedido in pedidos:
-                # ✅ MOSTRAR SI ESTÁ LISTO, ENTREGADO O PAGADO
-                if pedido.get("estado") in ["Listo", "Entregado", "Pagado"] and pedido.get("items"):
-                    item = crear_item_cuenta(pedido, backend_service, on_update_ui, page)
-                    if item:
-                        lista_cuentas.controls.append(item)
-            page.update()
-        except Exception as e:
-            print(f"Error al cargar pedidos: {e}")
-
-    def crear_item_cuenta(pedido, backend_service, on_update_ui, page):
-        total_pedido = sum(item["precio"] for item in pedido["items"])
-
-        # Recuperar o inicializar el estado de pago para este pedido
-        id_pedido = pedido["id"]
-        estado_pago = estados_pago.get(id_pedido, {"pago_cliente_valor": "", "cambio_valor": "Cambio: $0.00"})
-
-        # ✅ CAMPOS PARA PAGO Y CAMBIO - Inicializar con valores guardados
-        pago_cliente = ft.TextField(
-            label="Con cuánto paga",
-            input_filter=ft.NumbersOnlyInputFilter(),
-            width=200,
-            value=estado_pago["pago_cliente_valor"] # <-- Inicializar con el valor anterior
-        )
-        cambio_text = ft.Text(estado_pago["cambio_valor"], size=14, weight=ft.FontWeight.BOLD) # <-- Inicializar con el cambio anterior
-
-        # ✅ DROPDOWN PARA MÉTODO DE PAGO
-        metodo_pago = ft.Dropdown(
-            label="Método de pago",
-            options=[
-                ft.dropdown.Option("Efectivo"),
-                ft.dropdown.Option("Tarjeta"),
-                ft.dropdown.Option("QR"),
-            ],
-            value="Efectivo",  # Valor por defecto
-            width=200
-        )
-
-        def procesar_pago(e):
-            try:
-                pago = float(pago_cliente.value)
-                if pago < total_pedido:
-                    return
-                cambio = pago - total_pedido
-                cambio_text.value = f"Cambio: ${cambio:.2f}"
-                # Guardar el estado actual
-                estados_pago[id_pedido] = {
-                    "pago_cliente_valor": pago_cliente.value,
-                    "cambio_valor": cambio_text.value
-                }
-                page.update()
-            except ValueError:
-                pass # Si el valor no es un número, no hace nada
-
-        def terminar_pedido(e):
-            try:
-                # ✅ CAMBIAR ESTADO A "Entregado" EN LUGAR DE "Pagado"
-                backend_service.actualizar_estado_pedido(pedido["id"], "Entregado")
-                # Limpiar el estado de pago asociado a este pedido si se termina
-                estados_pago.pop(id_pedido, None)
-                on_update_ui()
-            except Exception as ex:
-                print(f"Error al terminar pedido: {ex}")
-
-        def eliminar_pedido(e):
-            try:
-                # Eliminar pedido del backend
-                backend_service.eliminar_pedido(pedido["id"])
-                # Limpiar el estado de pago asociado a este pedido si se elimina
-                estados_pago.pop(id_pedido, None)
-                on_update_ui()
-            except Exception as ex:
-                print(f"Error al eliminar pedido: {ex}")
-
-        origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
-        cliente_id = "Cliente App"
-
-        # Asociar el ID del pedido al contenedor para poder limpiar el estado si es necesario
-        return ft.Container(
-            content=ft.Column([
-                ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
-                ft.Text(f"Cliente {cliente_id}"),
-                ft.Text(f"Estado: {pedido.get('estado', 'Pendiente')}", color=ft.Colors.BLUE_200),
-                ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(f"Total: ${total_pedido:.2f}", size=16, weight=ft.FontWeight.BOLD),
-                ft.Row([
-                    pago_cliente,
-                    ft.ElevatedButton(
-                        "Calcular cambio",
-                        on_click=procesar_pago,
-                        style=ft.ButtonStyle(bgcolor=ft.Colors.AMBER_700, color=ft.Colors.WHITE)
-                    )
-                ]),
-                cambio_text,
-                ft.Row([
-                    metodo_pago,  # ✅ DROPDOWN DE MÉTODO DE PAGO
-                ]),
-                ft.Row([
-                    ft.ElevatedButton(
-                        "Terminar pedido",
-                        on_click=terminar_pedido,
-                        style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-                    ),
-                    ft.ElevatedButton(
-                        "Eliminar pedido",
-                        on_click=eliminar_pedido,
-                        style=ft.ButtonStyle(bgcolor=ft.Colors.RED_800, color=ft.Colors.WHITE),
-                        tooltip="Eliminar pedido accidental"
-                    )
-                ])
-            ]),
-            bgcolor=ft.Colors.BLUE_GREY_900,
-            padding=10,
-            border_radius=10
-        )
-
-    vista = ft.Container(
-        content=ft.Column([
-            ft.Text("Cuentas activas", size=24, weight=ft.FontWeight.BOLD),
-            lista_cuentas
-        ]),
-        expand=True
-    )
     vista.actualizar = actualizar
     return vista
 
 # === FUNCIÓN: crear_vista_admin ===
 # Vista de administración para gestionar menú y clientes.
-
+# (Esta función se mantiene exactamente como estaba en tu app.py original)
 def crear_vista_admin(backend_service, menu, on_update_ui, page):
     tipos = list(set(item["tipo"] for item in menu))
     tipos.sort()
-
     tipo_item_admin = ft.Dropdown(
         label="Tipo de item (Agregar)",
         options=[ft.dropdown.Option(tipo) for tipo in tipos],
         value=tipos[0] if tipos else "Entradas",
         width=250,
     )
-
     nombre_item = ft.TextField(label="Nombre de item", width=250)
     precio_item = ft.TextField(label="Precio", width=250)
-
     tipo_item_eliminar = ft.Dropdown(
         label="Tipo item (Eliminar)",
         options=[ft.dropdown.Option(tipo) for tipo in tipos],
         value=tipos[0] if tipos else "Entradas",
         width=250,
     )
-
     item_eliminar = ft.Dropdown(label="Seleccionar item a eliminar", width=300)
 
     def actualizar_items_eliminar(e):
@@ -812,19 +667,15 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         tipo = tipo_item_admin.value
         nombre = (nombre_item.value or "").strip()
         texto_precio = (precio_item.value or "").strip()
-
         if not tipo or not nombre or not texto_precio:
             return
-
         texto_precio = texto_precio.replace(",", ".")
         try:
             precio = float(texto_precio)
         except ValueError:
             return
-
         if precio <= 0:
             return
-
         try:
             # Usar el nuevo método del backend
             backend_service.agregar_item_menu(nombre, precio, tipo)
@@ -837,7 +688,6 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         nombre = item_eliminar.value
         if not tipo or not nombre:
             return
-
         try:
             # Usar el nuevo método del backend
             backend_service.eliminar_item_menu(nombre, tipo)
@@ -893,10 +743,8 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         nombre = nombre_cliente.value
         domicilio = domicilio_cliente.value
         celular = celular_cliente.value
-
         if not nombre or not domicilio or not celular:
             return
-
         try:
             backend_service.agregar_cliente(nombre, domicilio, celular)
             nombre_cliente.value = ""
@@ -961,13 +809,11 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         bgcolor=ft.Colors.BLUE_GREY_900,
         expand=True  # ✅ CONTAINER PRINCIPAL EXPANDIDO
     )
-
     vista.actualizar_lista_clientes = actualizar_lista_clientes
     return vista
 
 # === CLASE: RestauranteGUI ===
 # Clase principal que maneja la interfaz gráfica y los estados del sistema.
-
 class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
@@ -981,7 +827,7 @@ class RestauranteGUI:
         self.mesas_grid = None
         self.panel_gestion = None
         self.vista_cocina = None
-        self.vista_caja = None
+        # self.vista_caja = None # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
         self.vista_admin = None
         self.vista_inventario = None
         self.vista_recetas = None
@@ -990,8 +836,7 @@ class RestauranteGUI:
         self.vista_personalizacion = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
         self.hilo_sincronizacion = None
-        
-    
+
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
         def actualizar_periodicamente():
@@ -1003,11 +848,9 @@ class RestauranteGUI:
                 except Exception as e:
                     print(f"Error en sincronización: {e}")
                     time.sleep(3)
-
         # ✅ INICIAR HILO DE SINCRONIZACIÓN
         self.hilo_sincronizacion = threading.Thread(target=actualizar_periodicamente, daemon=True)
         self.hilo_sincronizacion.start()
-        
 
     def main(self, page: ft.Page):
         self.page = page
@@ -1038,7 +881,8 @@ class RestauranteGUI:
         self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
         self.panel_gestion = crear_panel_gestion(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_cocina = crear_vista_cocina(self.backend_service, self.actualizar_ui_completo, page)
-        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
+        # self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- COMENTAR ESTA LINEA (ANTIGUA)
+        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- USAR LA NUEVA VISTA DE caja_view.py
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
         self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)
@@ -1067,7 +911,7 @@ class RestauranteGUI:
                 ft.Tab(
                     text="Caja",
                     icon=ft.Icons.POINT_OF_SALE,
-                    content=self.vista_caja
+                    content=self.vista_caja # <-- USAR LA NUEVA VISTA
                 ),
                 ft.Tab(
                     text="Administracion",
@@ -1150,16 +994,16 @@ class RestauranteGUI:
         nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
         self.mesas_grid.controls = nuevo_grid.controls
         self.mesas_grid.update()
-
         if hasattr(self.vista_cocina, 'actualizar'):
             self.vista_cocina.actualizar()
-        if hasattr(self.vista_caja, 'actualizar'):
+        # if hasattr(self.vista_caja, 'actualizar'): # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
+        #     self.vista_caja.actualizar()
+        if hasattr(self.vista_caja, 'actualizar'): # <-- USAR EL METODO DE LA NUEVA VISTA
             self.vista_caja.actualizar()
         if hasattr(self.vista_admin, 'actualizar_lista_clientes'):
             self.vista_admin.actualizar_lista_clientes()
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
-
         self.page.update()
 
 def main():

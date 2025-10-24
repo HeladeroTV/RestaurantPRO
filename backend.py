@@ -180,7 +180,8 @@ def obtener_pedidos_activos(conn: psycopg2.extensions.connection = Depends(get_d
 
 @app.patch("/pedidos/{pedido_id}/estado")
 def actualizar_estado_pedido(pedido_id: int, estado: str, conn: psycopg2.extensions.connection = Depends(get_db)):
-    if estado not in ["Pendiente", "En preparacion", "Listo", "Entregado"]:
+    # Agregar "Pagado" a la lista de estados válidos
+    if estado not in ["Pendiente", "En preparacion", "Listo", "Entregado", "Pagado"]: # <-- Añadido "Pagado"
         raise HTTPException(status_code=400, detail="Estado inválido")
     
     with conn.cursor() as cursor:
