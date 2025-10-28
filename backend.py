@@ -17,6 +17,7 @@ import json
 from inventario_backend import inventario_app
 from recetas_backend import recetas_app
 from configuraciones_backend import configuraciones_app
+from fastapi import Query 
 
 app = FastAPI(title="RestaurantIA Backend")
 
@@ -558,3 +559,65 @@ def obtener_reporte(
             "productos_vendidos": productos_vendidos,
             "productos_mas_vendidos": productos_mas_vendidos_lista
         }
+        
+
+@app.get("/analisis/productos")
+def obtener_analisis_productos(
+    start_date: str = Query(None, description="Fecha de inicio (YYYY-MM-DD)"),
+    end_date: str = Query(None, description="Fecha de fin (YYYY-MM-DD)"),
+    conn: psycopg2.extensions.connection = Depends(get_db)
+):
+    """
+    Obtiene el análisis de productos vendidos en un rango de fechas.
+    """
+    # Construir la condición de fecha si se proporcionan parámetros
+    fecha_condicion = ""
+    params = []
+    if start_date and end_date:
+        fecha_condicion = "AND fecha_hora >= %s AND fecha_hora < %s"
+        params = [start_date, end_date]
+    elif start_date:
+        fecha_condicion = "AND fecha_hora >= %s"
+        params = [start_date]
+    elif end_date:
+        # Si solo se da end_date, asumimos desde el principio de los tiempos hasta end_date
+        fecha_condicion = "AND fecha_hora < %s"
+        params = [end_date]
+
+    with conn.cursor() as cursor:
+        # Consultar ítems de pedidos en el rango de fechas y con estado de venta completada
+        cursor.execute(f"""
+            SELECT items
+            FROM pedidos
+            WHERE estado IN ('Entregado', 'Pagado') -- Ajustar según tu definición de venta completada
+            {fecha_condicion}
+        """, params)
+        
+        pedidos = cursor.fetchall()
+
+    # Contar productos vendidos
+    conteo_productos = {}
+    for pedido in pedidos:
+        # Asumiendo que 'items' es una lista de diccionarios
+        items = pedido['items']
+        if isinstance(items, str):
+            items = json.loads(items) # Parsear si es string (aunque debería ser lista por el modelo de Pydantic o por cómo se inserta)
+
+        if isinstance(items, list):
+            for item in items:
+                nombre = item.get('nombre')
+                if nombre:
+                    conteo_productos[nombre] = conteo_productos.get(nombre, 0) + 1
+
+    # Ordenar productos
+    productos_ordenados = sorted(conteo_productos.items(), key=lambda x: x[1], reverse=True)
+    productos_mas_vendidos = [{"nombre": k, "cantidad": v} for k, v in productos_ordenados[:10]] # Top 10
+    productos_menos_vendidos = [{"nombre": k, "cantidad": v} for k, v in productos_ordenados[-10:]] # Últimos 10 (menos vendidos)
+
+    # Devolver el análisis
+    return {
+        "productos_mas_vendidos": productos_mas_vendidos,
+        "productos_menos_vendidos": productos_menos_vendidos
+    }
+
+

@@ -189,3 +189,18 @@ class BackendService:
         r = requests.get(f"{self.base_url}/reportes/", params=params)
         r.raise_for_status()
         return r.json()
+    
+    
+    def obtener_analisis_productos(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
+        """
+        Obtiene el análisis de productos vendidos.
+        """
+        params = {}
+        if start_date:
+            params["start_date"] = start_date
+        if end_date:
+            params["end_date"] = end_date
+
+        r = requests.get(f"{self.base_url}/analisis/productos/", params=params)
+        r.raise_for_status()
+        return r.json()
