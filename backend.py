@@ -6,8 +6,8 @@ from pydantic import BaseModel
 from typing import List, Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from datetime import datetime
 import json
+from datetime import datetime, date, timedelta
 
 
 
@@ -18,6 +18,8 @@ from inventario_backend import inventario_app
 from recetas_backend import recetas_app
 from configuraciones_backend import configuraciones_app
 from fastapi import Query 
+from fastapi import FastAPI, HTTPException, Depends, Query # Asegúrate de tener Query importado
+
 
 app = FastAPI(title="RestaurantIA Backend")
 
@@ -28,6 +30,10 @@ app.mount("/configuraciones", configuraciones_app)
 
 # Configuración directa de PostgreSQL
 DATABASE_URL = "dbname=restaurant_db user=postgres password=postgres host=localhost port=5432"
+
+@app.get("/")
+def read_root():
+    return {"message": "Bienvenido a la API del Sistema de Restaurante"}
 
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
@@ -68,6 +74,12 @@ class ClienteResponse(BaseModel):
     domicilio: str
     celular: str
     fecha_registro: str
+    
+class ReservaCreate(BaseModel):
+    mesa_numero: int
+    cliente_id: int
+    fecha_hora_inicio: str  # "YYYY-MM-DD HH:MM:SS"
+    fecha_hora_fin: Optional[str] = None # "YYYY-MM-DD HH:MM:SS"
 
 # Endpoints
 @app.get("/health")
@@ -621,3 +633,304 @@ def obtener_analisis_productos(
     }
 
 
+@app.get("/mesas")
+def obtener_mesas_detalladas(conn = Depends(get_db)):
+    """
+    Obtiene el estado detallado de todas las mesas, incluyendo ocupación y reservas.
+    """
+    try:
+        # Obtener mesas físicas desde la base de datos
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT numero, capacidad FROM mesas WHERE numero != 99 ORDER BY numero;") # Excluir mesa virtual
+            mesas_db = cursor.fetchall()
+
+        # Obtener reservas activas (pueden ser para hoy o futuras, dependiendo de tu lógica)
+        # Asumiendo una tabla 'reservas' con columnas: id, mesa_numero, cliente_id, fecha_hora_inicio, fecha_hora_fin
+        # y una tabla 'clientes' con id, nombre
+        with conn.cursor() as cursor:
+            # Obtener reservas para hoy o futuras (puedes ajustar la lógica de fecha)
+            from datetime import datetime, date # Importar aquí o asegurarte que esté arriba
+            hoy = date.today().strftime("%Y-%m-%d")
+            cursor.execute("""
+                SELECT r.mesa_numero, r.fecha_hora_inicio, r.fecha_hora_fin, c.nombre as cliente_nombre
+                FROM reservas r
+                JOIN clientes c ON r.cliente_id = c.id
+                WHERE DATE(r.fecha_hora_inicio) >= %s
+                ORDER BY r.fecha_hora_inicio;
+            """, (hoy,))
+            reservas_db = cursor.fetchall()
+
+        # Obtener pedidos activos para saber qué mesas están ocupadas
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT mesa_numero
+                FROM pedidos
+                WHERE estado IN ('Tomando pedido', 'Pendiente', 'En preparacion', 'Listo', 'Entregado')
+                AND mesa_numero != 99; -- Excluir pedido digital
+            """)
+            pedidos_activos = set(row['mesa_numero'] for row in cursor.fetchall())
+
+        # Combinar la información
+        mesas_result = []
+        reservas_por_mesa = {}
+        for res in reservas_db:
+            # Agrupar reservas por mesa (por si hay varias en un día)
+            if res['mesa_numero'] not in reservas_por_mesa:
+                reservas_por_mesa[res['mesa_numero']] = []
+            reservas_por_mesa[res['mesa_numero']].append({
+                "cliente_nombre": res['cliente_nombre'],
+                "fecha_hora_inicio": str(res['fecha_hora_inicio']), # Convertir a string para JSON
+                "fecha_hora_fin": str(res['fecha_hora_fin']) if res['fecha_hora_fin'] else None
+            })
+
+        for mesa_db in mesas_db:
+            numero = mesa_db['numero']
+            capacidad = mesa_db['capacidad']
+            ocupada = numero in pedidos_activos
+            reservada = numero in reservas_por_mesa
+
+            mesa_info = {
+                "numero": numero,
+                "capacidad": capacidad,
+                "ocupada": ocupada,
+                "reservada": reservada,
+                "cliente_reservado_nombre": None,
+                "fecha_hora_reserva": None
+            }
+
+            if reservada:
+                # Tomar la primera reserva encontrada para mostrar en la UI (puedes mejorar esta lógica)
+                primera_reserva = reservas_por_mesa[numero][0]
+                mesa_info["cliente_reservado_nombre"] = primera_reserva["cliente_nombre"]
+                mesa_info["fecha_hora_reserva"] = primera_reserva["fecha_hora_inicio"]
+
+            mesas_result.append(mesa_info)
+
+        # Agregar mesa virtual (99)
+        mesas_result.append({
+            "numero": 99,
+            "capacidad": 100, # o el valor que uses
+            "ocupada": False, # La mesa virtual no se "ocupa" como las físicas
+            "reservada": False, # Ni se "reserva"
+            "cliente_reservado_nombre": None,
+            "fecha_hora_reserva": None,
+            "es_virtual": True # Opcional: para distinguirla en la UI
+        })
+
+        return mesas_result
+
+    except Exception as e:
+        print(f"Error en obtener_mesas_detalladas: {e}")
+        # En caso de error, devolver mesas por defecto como lo hacía antes
+        # Asegúrate de que esta estructura coincida con la que espera crear_mesas_grid
+        return [
+            {"numero": 1, "capacidad": 2, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None},
+            {"numero": 2, "capacidad": 2, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None},
+            {"numero": 3, "capacidad": 4, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None},
+            {"numero": 4, "capacidad": 4, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None},
+            {"numero": 5, "capacidad": 6, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None},
+            {"numero": 6, "capacidad": 6, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None},
+            {"numero": 99, "capacidad": 100, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None, "es_virtual": True}
+        ]
+
+# Opcional: Endpoint para obtener mesas disponibles en una fecha/hora específica
+@app.get("/mesas/disponibles/")
+def obtener_mesas_disponibles_para_fecha_hora(
+    fecha_hora_str: str = Query(..., description="Fecha y hora en formato YYYY-MM-DD HH:MM:SS"),
+    conn = Depends(get_db)
+):
+    """
+    Obtiene la lista de mesas disponibles para una fecha y hora específica.
+    Una mesa está disponible si no está ocupada por un pedido activo ni reservada para esa hora.
+    """
+    from datetime import datetime
+    try:
+        fecha_hora_obj = datetime.strptime(fecha_hora_str, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato de fecha/hora inválido. Use YYYY-MM-DD HH:MM:SS")
+
+    try:
+        # Obtener mesas físicas
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT numero, capacidad FROM mesas WHERE numero != 99;")
+            mesas_db = cursor.fetchall()
+
+        # Obtener mesas ocupadas en ese momento (basado en pedidos activos)
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT mesa_numero
+                FROM pedidos
+                WHERE estado IN ('Tomando pedido', 'Pendiente', 'En preparacion', 'Listo', 'Entregado')
+                AND mesa_numero != 99;
+            """)
+            ocupadas_db = set(row['mesa_numero'] for row in cursor.fetchall())
+
+        # Obtener mesas reservadas en ese momento
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT mesa_numero
+                FROM reservas
+                WHERE %s BETWEEN fecha_hora_inicio AND COALESCE(fecha_hora_fin, fecha_hora_inicio + INTERVAL '1 hour');
+                -- Asumimos una duración de 1 hora si no se especifica fin
+            """, (fecha_hora_obj,))
+            reservadas_db = set(row['mesa_numero'] for row in cursor.fetchall())
+
+        mesas_disponibles = []
+        for mesa in mesas_db:
+            if mesa['numero'] not in ocupadas_db and mesa['numero'] not in reservadas_db:
+                mesas_disponibles.append({
+                    "numero": mesa['numero'],
+                    "capacidad": mesa['capacidad']
+                })
+
+        return mesas_disponibles
+
+    except Exception as e:
+        print(f"Error en obtener_mesas_disponibles_para_fecha_hora: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor al consultar disponibilidad.")
+    
+
+class ReservaCreate(BaseModel):
+    mesa_numero: int
+    cliente_id: int
+    fecha_hora_inicio: str  # "YYYY-MM-DD HH:MM:SS"
+    fecha_hora_fin: Optional[str] = None # "YYYY-MM-DD HH:MM:SS"
+
+class ReservaUpdate(BaseModel):
+    mesa_numero: Optional[int] = None
+    cliente_id: Optional[int] = None
+    fecha_hora_inicio: Optional[str] = None # "YYYY-MM-DD HH:MM:SS"
+    fecha_hora_fin: Optional[str] = None # "YYYY-MM-DD HH:MM:SS"
+
+@app.get("/reservas/")
+def obtener_reservas(
+    fecha: Optional[str] = Query(None, description="Fecha en formato YYYY-MM-DD para filtrar"),
+    conn = Depends(get_db)
+):
+    """
+    Obtiene todas las reservas o filtra por fecha.
+    """
+    try:
+        query = """
+            SELECT r.id, r.mesa_numero, r.cliente_id, c.nombre as cliente_nombre, r.fecha_hora_inicio, r.fecha_hora_fin
+            FROM reservas r
+            JOIN clientes c ON r.cliente_id = c.id
+        """
+        params = []
+        if fecha:
+            query += " WHERE DATE(r.fecha_hora_inicio) = %s"
+            params.append(fecha)
+
+        query += " ORDER BY r.fecha_hora_inicio;"
+
+        with conn.cursor() as cursor:
+            cursor.execute(query, params)
+            reservas_db = cursor.fetchall()
+
+        reservas = []
+        for res in reservas_db:
+            reservas.append({
+                "id": res['id'],
+                "mesa_numero": res['mesa_numero'],
+                "cliente_id": res['cliente_id'],
+                "cliente_nombre": res['cliente_nombre'],
+                "fecha_hora_inicio": str(res['fecha_hora_inicio']),
+                "fecha_hora_fin": str(res['fecha_hora_fin']) if res['fecha_hora_fin'] else None
+            })
+
+        return reservas
+
+    except Exception as e:
+        print(f"Error en obtener_reservas: {e}")
+        raise HTTPException(status_code=500, detail="Error interno del servidor al obtener reservas.")
+
+
+@app.post("/reservas/", status_code=201)
+def crear_reserva_simplificada(reserva: ReservaCreate, conn = Depends(get_db)):
+    """
+    Crea una nueva reserva. Versión simplificada sin verificación de conflictos.
+    """
+    try:
+        # Asumimos que cliente_id y mesa_numero son válidos (verificados por Pydantic)
+        # Asumimos que fecha_hora_inicio y fecha_hora_fin tienen el formato correcto (verificado por Pydantic o antes)
+        # No verificamos conflictos de horarios por ahora
+
+        # Calcular fecha_hora_fin si es None
+        fecha_inicio_obj = datetime.fromisoformat(reserva.fecha_hora_inicio.replace(" ", "T"))
+        if reserva.fecha_hora_fin:
+            fecha_fin_obj = datetime.fromisoformat(reserva.fecha_hora_fin.replace(" ", "T"))
+        else:
+            fecha_fin_obj = fecha_inicio_obj + timedelta(hours=1) # Asumir 1 hora si no se da fin
+
+        with conn.cursor() as cursor:
+            # Insertar la reserva directamente
+            # Usamos placeholders %s para evitar inyección SQL
+            cursor.execute("""
+                INSERT INTO reservas (mesa_numero, cliente_id, fecha_hora_inicio, fecha_hora_fin)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id;
+            """, (reserva.mesa_numero, reserva.cliente_id, fecha_inicio_obj, fecha_fin_obj))
+            reserva_id = cursor.fetchone()['id']
+        conn.commit() # Confirmar la transacción
+
+        # Opcional: Obtener y devolver la reserva creada
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT r.id, r.mesa_numero, r.cliente_id, c.nombre as cliente_nombre, r.fecha_hora_inicio, r.fecha_hora_fin
+                FROM reservas r
+                JOIN clientes c ON r.cliente_id = c.id
+                WHERE r.id = %s;
+            """, (reserva_id,))
+            nueva_reserva_db = cursor.fetchone()
+
+        if not nueva_reserva_db:
+            # Esto es raro, pero por si acaso
+            raise HTTPException(status_code=404, detail="Reserva no encontrada después de crearla.")
+
+        return {
+            "id": nueva_reserva_db['id'],
+            "mesa_numero": nueva_reserva_db['mesa_numero'],
+            "cliente_id": nueva_reserva_db['cliente_id'],
+            "cliente_nombre": nueva_reserva_db['cliente_nombre'],
+            "fecha_hora_inicio": str(nueva_reserva_db['fecha_hora_inicio']),
+            "fecha_hora_fin": str(nueva_reserva_db['fecha_hora_fin']) if nueva_reserva_db['fecha_hora_fin'] else None
+        }
+
+    except ValueError as ve:
+        # Captura errores de formato de fecha/hora si fromisoformat falla
+        print(f"Error de formato de fecha/hora en el backend: {ve}")
+        raise HTTPException(status_code=400, detail=f"Formato de fecha/hora inválido: {ve}")
+    except HTTPException:
+        # Re-raise HTTP exceptions (como 400, 404)
+        raise
+    except Exception as e:
+        # Captura cualquier otro error inesperado
+        print(f"Error interno en crear_reserva_simplificada: {e}")
+        import traceback
+        traceback.print_exc() # Imprime el traceback completo
+        conn.rollback() # Revertir la transacción en caso de error inesperado
+        raise HTTPException(status_code=500, detail="Error interno del servidor al crear la reserva.")
+
+
+@app.delete("/reservas/{reserva_id}")
+def eliminar_reserva(reserva_id: int, conn = Depends(get_db)):
+    """
+    Elimina una reserva existente por su ID.
+    """
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("DELETE FROM reservas WHERE id = %s RETURNING id;", (reserva_id,))
+            eliminado = cursor.fetchone()
+            if not eliminado:
+                raise HTTPException(status_code=404, detail="Reserva no encontrada")
+
+        conn.commit()
+        return {"status": "ok", "message": "Reserva eliminada"}
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (como 404)
+        raise
+    except Exception as e:
+        print(f"Error en eliminar_reserva: {e}")
+        conn.rollback() # Revertir la transacción en caso de error
+        raise HTTPException(status_code=500, detail="Error interno del servidor al eliminar la reserva.")

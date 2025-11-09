@@ -16,6 +16,8 @@ from recetas_view import crear_vista_recetas
 from configuraciones_view import crear_vista_configuraciones
 from reportes_view import crear_vista_reportes
 from caja_view import crear_vista_caja # <-- IMPORTAR LA NUEVA VISTA DE CAJA
+from reservas_view import crear_vista_reservas
+from reservas_service import ReservasService # Asumiendo que creas este archivo
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -110,8 +112,6 @@ def crear_selector_item(menu):
     container.get_selected_item = get_selected_item
     return container
 
-# === FUNCIÓN: crear_mesas_grid ===
-# Genera una cuadrícula visual de mesas físicas y una mesa virtual para pedidos app.
 def crear_mesas_grid(backend_service, on_select):
     try:
         # Obtener el estado real de las mesas del backend
@@ -153,8 +153,47 @@ def crear_mesas_grid(backend_service, on_select):
     for mesa in mesas_fisicas:
         if mesa["numero"] == 99:
             continue
-        color = ft.Colors.GREEN_700 if not mesa["ocupada"] else ft.Colors.RED_700
-        estado = "LIBRE" if not mesa["ocupada"] else "OCUPADA"
+
+        # Manejar claves de reserva de forma segura
+        ocupada = mesa.get("ocupada", False) # Usar .get() con valor por defecto
+        reservada = mesa.get("reservada", False) # Usar .get() con valor por defecto
+        cliente_reservado_nombre = mesa.get("cliente_reservado_nombre", "N/A") # Usar .get() con valor por defecto
+        fecha_hora_reserva = mesa.get("fecha_hora_reserva", "N/A") # Usar .get() con valor por defecto
+
+        # Determinar color y estado basado en ocupada y reservada
+        if ocupada:
+            color = ft.Colors.RED_700
+            estado = "OCUPADA"
+            detalle = ""
+        elif reservada:
+            color = ft.Colors.BLUE_700 # Color para mesa reservada
+            estado = "RESERVADA"
+            detalle = f"{cliente_reservado_nombre}\n{fecha_hora_reserva}"
+        else:
+            color = ft.Colors.GREEN_700
+            estado = "LIBRE"
+            detalle = ""
+
+        contenido_mesa = ft.Column(
+                alignment=ft.MainAxisAlignment.CENTER,
+                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                spacing=5,
+                controls=[
+                    ft.Row(
+                        alignment=ft.MainAxisAlignment.CENTER,
+                        controls=[
+                            ft.Icon(ft.Icons.TABLE_RESTAURANT, color=ft.Colors.AMBER_400),
+                            ft.Text(f"Mesa {mesa['numero']}", size=16, weight=ft.FontWeight.BOLD),
+                        ]
+                    ),
+                    ft.Text(f"Capacidad: {mesa['capacidad']}", size=12),
+                    ft.Text(estado, size=14, weight=ft.FontWeight.BOLD)
+                ]
+            )
+        # Añadir detalle si existe (para mesas reservadas)
+        if detalle:
+            contenido_mesa.controls.append(ft.Text(detalle, size=10, color=ft.Colors.WHITE, italic=True))
+
         grid.controls.append(
             ft.Container(
                 key=f"mesa-{mesa['numero']}",
@@ -163,26 +202,11 @@ def crear_mesas_grid(backend_service, on_select):
                 padding=15,
                 ink=True,
                 on_click=lambda e, num=mesa['numero']: on_select(num),
-                content=ft.Column(
-                    alignment=ft.MainAxisAlignment.CENTER,
-                    horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                    spacing=5,
-                    controls=[
-                        ft.Row(
-                            alignment=ft.MainAxisAlignment.CENTER,
-                            controls=[
-                                ft.Icon(ft.Icons.TABLE_RESTAURANT, color=ft.Colors.AMBER_400),
-                                ft.Text(f"Mesa {mesa['numero']}", size=16, weight=ft.FontWeight.BOLD),
-                            ]
-                        ),
-                        ft.Text(f"Capacidad: {mesa['capacidad']}", size=12),
-                        ft.Text(estado, size=14, weight=ft.FontWeight.BOLD)
-                    ]
-                )
+                content=contenido_mesa
             )
         )
 
-    # Mesa virtual
+    # Mesa virtual (sin cambios)
     contenido_mesa_virtual = ft.Column(
         alignment=ft.MainAxisAlignment.CENTER,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -192,10 +216,10 @@ def crear_mesas_grid(backend_service, on_select):
                 alignment=ft.MainAxisAlignment.CENTER,
                 controls=[
                     ft.Icon(ft.Icons.MOBILE_FRIENDLY, color=ft.Colors.AMBER_400),
-                    ft.Text("Digital", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),  # ✅ CAMBIAR A "Digital"
+                    ft.Text("Digital", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                 ]
             ),
-            ft.Text("📱 Pedido por Digital", size=12, color=ft.Colors.WHITE),  # ✅ CAMBIAR A "Digital"
+            ft.Text("📱 Pedido por Digital", size=12, color=ft.Colors.WHITE),
             ft.Text("Siempre disponible", size=10, color=ft.Colors.WHITE),
         ]
     )
@@ -321,24 +345,85 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             estado["pedido_actual"] = None
             if not mesa_seleccionada:
                 return
-            if mesa_seleccionada["numero"] == 99:
-                mesa_info.value = "Digital - Pedidos por aplicación móvil"  # ✅ CAMBIAR A "Digital"
-            else:
+
+            # Validar estado de la mesa
+            if mesa_seleccionada.get("ocupada", False):
+                # Mesa ocupada, no se puede asignar nuevo cliente aquí, pero se puede gestionar el pedido existente
+                # Buscar pedido existente para esta mesa
+                pedidos_activos = backend_service.obtener_pedidos_activos()
+                pedido_existente = next((p for p in pedidos_activos if p["mesa_numero"] == numero_mesa and p.get("estado") in ["Tomando pedido", "Pendiente", "En preparacion"]), None)
+                if pedido_existente:
+                    estado["pedido_actual"] = pedido_existente
+                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas (Pedido Activo)"
+                else:
+                    # Caso raro: mesa ocupada pero sin pedido activo visible
+                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Ocupada (Estado inconsistente)"
+                    estado["pedido_actual"] = None
+            elif mesa_seleccionada.get("reservada", False):
+                # Mesa reservada, verificar fecha/hora
+                fecha_reserva_str = mesa_seleccionada.get("fecha_hora_reserva")
+                if fecha_reserva_str:
+                    try:
+                        # Parsear la fecha de reserva (ajusta el formato si es diferente)
+                        fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S") # Remover microsegundos si existen
+                        ahora = datetime.now()
+                        # Permitir asignar si la reserva es ahora o en el pasado reciente (por ejemplo, 30 mins)
+                        # O mostrar un mensaje si es en el futuro
+                        if ahora >= fecha_reserva or (ahora - fecha_reserva).total_seconds() < 1800: # 30 minutos en segundos
+                            mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} - Capacidad: {mesa_seleccionada['capacidad']} personas"
+                        else:
+                            # Reserva futura, no se debería asignar cliente nuevo aún
+                            mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} el {fecha_reserva_str}"
+                            estado["pedido_actual"] = None # No se puede asignar cliente nuevo
+                            # Opcional: Mostrar mensaje o deshabilitar botones
+                            asignar_btn.disabled = True
+                            page.update()
+                            return # Salir sin inicializar el pedido
+                    except ValueError:
+                        print(f"Error al parsear fecha de reserva para mesa {numero_mesa}: {fecha_reserva_str}")
+                        mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Fecha inválida)"
+                else:
+                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Sin fecha)"
+            else: # Mesa libre
                 mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
+            # ... (resto del código de seleccionar_mesa_interna)
             resumen_pedido.value = ""
             nota_pedido.value = ""
-            # --- ACTUALIZACIÓN: Reiniciar selector de cantidad ---
-            cantidad_dropdown.value = "1"
-            cantidad_dropdown.disabled = True
-            # --- FIN ACTUALIZACIÓN ---
             actualizar_estado_botones()
         except Exception as e:
-            pass
+            print(f"Error seleccionando mesa: {e}")
+            mesa_info.value = f"Error al seleccionar mesa {numero_mesa}"
 
     def asignar_cliente(e):
         mesa_seleccionada = estado["mesa_seleccionada"]
         if not mesa_seleccionada:
             return
+        # Re-validar estado antes de asignar (por si cambió desde que se seleccionó)
+        mesas_actualizadas = backend_service.obtener_mesas()
+        mesa_estado_actual = next((m for m in mesas_actualizadas if m["numero"] == mesa_seleccionada["numero"]), None)
+        if not mesa_estado_actual:
+            print("Error: Mesa no encontrada al asignar cliente.")
+            return
+
+        # Verificar si la mesa está ocupada o reservada para otra fecha
+        if mesa_estado_actual.get("ocupada", False):
+            print(f"La mesa {mesa_seleccionada['numero']} ya está ocupada.")
+            return # No hacer nada o mostrar mensaje
+        elif mesa_estado_actual.get("reservada", False):
+            # Opcional: Verificar fecha aquí también si no se hizo en seleccionar_mesa_interna
+            fecha_reserva_str = mesa_estado_actual.get("fecha_hora_reserva")
+            if fecha_reserva_str:
+                try:
+                    fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
+                    ahora = datetime.now()
+                    if ahora < fecha_reserva and (fecha_reserva - ahora).total_seconds() >= 1800: # Futura y no dentro de 30 mins
+                        print(f"La mesa {mesa_seleccionada['numero']} está reservada para más tarde.")
+                        return # No hacer nada o mostrar mensaje
+                    # Si llega aquí, es una reserva actual o pasada recientemente, se puede "ocupar"
+                except ValueError:
+                    print(f"Error al parsear fecha de reserva para mesa {mesa_seleccionada['numero']}")
+                    return
+
         try:
             # ✅ CREAR PEDIDO EN MEMORIA (NO EN BASE DE DATOS AÚN)
             nuevo_pedido = {
@@ -352,9 +437,6 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             }
             estado["pedido_actual"] = nuevo_pedido
             resumen_pedido.value = ""
-            # --- ACTUALIZACIÓN: Habilitar selector de cantidad ---
-            cantidad_dropdown.disabled = selector_item.get_selected_item() is None
-            # --- FIN ACTUALIZACIÓN ---
             on_update_ui()
             actualizar_estado_botones()
         except Exception as ex:
@@ -836,6 +918,8 @@ class RestauranteGUI:
         self.vista_personalizacion = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
         self.hilo_sincronizacion = None
+        self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
+        self.vista_reservas = None # Añadir esta línea
 
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
@@ -893,6 +977,7 @@ class RestauranteGUI:
             page
         )
         self.vista_reportes = crear_vista_reportes(self.backend_service, self.actualizar_ui_completo, page)
+        self.vista_reservas = crear_vista_reservas(self.reservas_service, self.backend_service, self.backend_service, self.actualizar_ui_completo, page) # Pasar servicios necesarios
 
         tabs = ft.Tabs(
             selected_index=0,
@@ -933,6 +1018,12 @@ class RestauranteGUI:
                     icon=ft.Icons.SETTINGS,
                     content=self.vista_configuraciones
                 ),
+                
+                ft.Tab(
+                    text="Reservas",
+                    icon=ft.Icons.CALENDAR_TODAY, # Icono para reservas
+                    content=self.vista_reservas
+                ),
                 ft.Tab(
                     text="Reportes",
                     icon=ft.Icons.ANALYTICS,
@@ -962,6 +1053,7 @@ class RestauranteGUI:
         # ✅ INICIAR SINCRONIZACIÓN AUTOMÁTICA
         self.iniciar_sincronizacion()
         self.actualizar_ui_completo()
+        
 
     def crear_vista_mesera(self):
         return ft.Container(
@@ -1005,6 +1097,10 @@ class RestauranteGUI:
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
         self.page.update()
+        
+        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
+    # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
+            pass # Opcional, dependiendo de la lógica de la vista de reservas
 
 def main():
     app = RestauranteGUI()
