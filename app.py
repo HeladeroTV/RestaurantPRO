@@ -1143,6 +1143,18 @@ class RestauranteGUI:
         if self.panel_gestion:
             self.panel_gestion.seleccionar_mesa(numero_mesa)
 
+    def actualizar_lista_inventario(self):
+        """Llama a actualizar_lista de la vista de inventario solo si no hay campo en edición."""
+        if hasattr(self.vista_inventario, 'campo_en_edicion_id') and hasattr(self.vista_inventario, 'actualizar_lista'):
+            # Verificar si hay un campo en edición en la vista de inventario
+            if getattr(self.vista_inventario, 'campo_en_edicion_id', None) is not None:
+                print("Hay un campo en edición en la vista de inventario, se omite la actualización.")
+                return # Salir sin actualizar la lista
+        # Si no hay campo en edición o no se puede verificar, llamar a actualizar_lista
+        if hasattr(self.vista_inventario, 'actualizar_lista'):
+            self.vista_inventario.actualizar_lista()
+    
+    
     def actualizar_ui_completo(self):
         nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
         self.mesas_grid.controls = nuevo_grid.controls
@@ -1155,12 +1167,11 @@ class RestauranteGUI:
             self.vista_caja.actualizar()
         if hasattr(self.vista_admin, 'actualizar_lista_clientes'):
             self.vista_admin.actualizar_lista_clientes()
-        if hasattr(self.vista_inventario, 'actualizar_lista'):
-            self.vista_inventario.actualizar_lista()
-        # --- AÑADIR ESTA LÍNEA ---
-        if hasattr(self.vista_recetas, 'actualizar_datos'):
-            self.vista_recetas.actualizar_datos()
-        # --- FIN AÑADIR ESTA LÍNEA ---
+        # --- MODIFICACIÓN PARA INVENTARIO ---
+        # if hasattr(self.vista_inventario, 'actualizar_lista'):
+        #     self.vista_inventario.actualizar_lista() # <-- COMENTAR ESTA LINEA
+        self.actualizar_lista_inventario() # <-- USAR EL NUEVO METODO
+        # --- FIN MODIFICACIÓN ---
         self.page.update()
         if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
     # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
