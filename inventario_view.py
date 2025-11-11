@@ -1,7 +1,10 @@
+# inventario_view.py
 import flet as ft
 from typing import List, Dict, Any
 import threading
 import time
+import requests
+
 
 def crear_vista_inventario(inventory_service, on_update_ui, page):
     # Campos de entrada
@@ -117,8 +120,54 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         try:
             inventory_service.eliminar_item_inventario(item_id)
             on_update_ui() # Actualiza toda la UI, incluyendo inventario
+        except requests.exceptions.HTTPError as http_err:
+            if http_err.response.status_code == 400:
+                # Mostrar mensaje de error específico del backend
+                print(f"Error al eliminar ítem: {http_err.response.text}")
+                # Mostrar una alerta en la interfaz de Flet
+                def cerrar_alerta(e):
+                    page.close(dlg_error)
+                
+                dlg_error = ft.AlertDialog(
+                    title=ft.Text("No se puede eliminar"),
+                    content=ft.Text(http_err.response.text), # Muestra el mensaje del backend
+                    actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta)],
+                    actions_alignment=ft.MainAxisAlignment.END,
+                )
+                page.dialog = dlg_error
+                dlg_error.open = True
+                page.update()
+            else:
+                # Otro error HTTP (como 500)
+                print(f"Error HTTP inesperado al eliminar ítem: {http_err}")
+                # Opcional: Mostrar una alerta genérica para otros errores
+                def cerrar_alerta_gen(e):
+                    page.close(dlg_error_gen)
+                
+                dlg_error_gen = ft.AlertDialog(
+                    title=ft.Text("Error"),
+                    content=ft.Text(f"Error inesperado al eliminar: {http_err.response.text}"),
+                    actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta_gen)],
+                    actions_alignment=ft.MainAxisAlignment.END,
+                )
+                page.dialog = dlg_error_gen
+                dlg_error_gen.open = True
+                page.update()
         except Exception as ex:
-            print(f"Error al eliminar ítem: {ex}")
+            print(f"Error inesperado al eliminar ítem: {ex}")
+            # Opcional: Mostrar una alerta para errores no HTTP
+            def cerrar_alerta_ex(e):
+                page.close(dlg_error_ex)
+            
+            dlg_error_ex = ft.AlertDialog(
+                title=ft.Text("Error"),
+                content=ft.Text(f"Error inesperado: {str(ex)}"),
+                actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta_ex)],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            page.dialog = dlg_error_ex
+            dlg_error_ex.open = True
+            page.update()
 
     vista = ft.Container(
         content=ft.Column([

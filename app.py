@@ -12,12 +12,13 @@ import time as time_module
 # IMPORTAR LAS NUEVAS CLASES DE INVENTARIO Y LA NUEVA VISTA DE CAJA
 from inventario_view import crear_vista_inventario
 from inventario_service import InventoryService
-from recetas_view import crear_vista_recetas
 from configuraciones_view import crear_vista_configuraciones
 from reportes_view import crear_vista_reportes
 from caja_view import crear_vista_caja # <-- IMPORTAR LA NUEVA VISTA DE CAJA
 from reservas_view import crear_vista_reservas
 from reservas_service import ReservasService # Asumiendo que creas este archivo
+from recetas_view import crear_vista_recetas
+from recetas_service import RecetasService
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -899,17 +900,14 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
 class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
-        from recetas_service import RecetasService
         from configuraciones_service import ConfiguracionesService
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
-        self.recetas_service = RecetasService()
         self.config_service = ConfiguracionesService()
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
         self.vista_cocina = None
-        # self.vista_caja = None # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
         self.vista_admin = None
         self.vista_inventario = None
         self.vista_recetas = None
@@ -920,6 +918,10 @@ class RestauranteGUI:
         self.hilo_sincronizacion = None
         self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
         self.vista_reservas = None # Añadir esta línea
+        self.hilo_sincronizacion = None
+        self.hilo_verificacion_inventario = None  # <-- NUEVA VARIABLE
+        self.recetas_service = RecetasService()
+        self.vista_recetas = None # Añadir esta línea
 
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
@@ -932,9 +934,61 @@ class RestauranteGUI:
                 except Exception as e:
                     print(f"Error en sincronización: {e}")
                     time.sleep(3)
-        # ✅ INICIAR HILO DE SINCRONIZACIÓN
+
+        def verificar_alertas_inventario():
+            """Verifica el inventario cada 30 segundos y muestra alerta si hay ingredientes bajos."""
+            while True:
+                try:
+                    items = self.inventory_service.obtener_inventario()
+                    
+                    # VERIFICAR ALERTAS DE INGREDIENTES BAJOS
+                    umbral_bajo = 5  # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
+                    ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
+
+                    # MOSTRAR ALERTA SI HAY INGREDIENTES BAJOS
+                    if ingredientes_bajos:
+                        nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
+                        
+                        # MOSTRAR VENTANA MODAL DE ALERTA
+                        def cerrar_alerta(e):
+                            # Cerrar la alerta
+                            if self.page.dialog:
+                                self.page.dialog.open = False
+                                self.page.update()
+
+                        dlg_alerta = ft.AlertDialog(
+                            title=ft.Text("⚠️ Alerta de Inventario", color=ft.Colors.WHITE),
+                            content=ft.Text(f"Los siguientes ingredientes están por debajo del umbral:\n\n{nombres_bajos}\n\nCantidad mínima: {umbral_bajo}", color=ft.Colors.WHITE),
+                            actions=[
+                                ft.TextButton("Aceptar", on_click=cerrar_alerta, style=ft.ButtonStyle(color=ft.Colors.WHITE))
+                            ],
+                            actions_alignment=ft.MainAxisAlignment.END,
+                            bgcolor=ft.Colors.RED_800,
+                            content_padding=ft.padding.all(20),
+                            actions_padding=ft.padding.all(10),
+                        )
+                        
+                        # Mostrar alerta en el hilo principal
+                        def mostrar_alerta():
+                            self.page.dialog = dlg_alerta
+                            dlg_alerta.open = True
+                            self.page.update()
+                        
+                        # Ejecutar en el hilo principal de Flet
+                        self.page.run_thread(mostrar_alerta)
+                    
+                    time.sleep(30)  # VERIFICAR CADA 30 SEGUNDOS
+                except Exception as e:
+                    print(f"Error en verificación periódica de inventario: {e}")
+                    time.sleep(30)  # ESPERAR 30 SEGUNDOS ANTES DE REINTENTAR
+
+        # ✅ INICIAR HILO DE SINCRONIZACIÓN GENERAL
         self.hilo_sincronizacion = threading.Thread(target=actualizar_periodicamente, daemon=True)
         self.hilo_sincronizacion.start()
+
+        # ✅ INICIAR HILO DE VERIFICACIÓN DE INVENTARIO
+        self.hilo_verificacion_inventario = threading.Thread(target=verificar_alertas_inventario, daemon=True)
+        self.hilo_verificacion_inventario.start()
 
     def main(self, page: ft.Page):
         self.page = page
@@ -969,10 +1023,17 @@ class RestauranteGUI:
         self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- USAR LA NUEVA VISTA DE caja_view.py
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
-        self.vista_recetas = crear_vista_recetas(self.recetas_service, self.actualizar_ui_completo, page)
         self.vista_configuraciones = crear_vista_configuraciones(
             self.config_service,
             self.inventory_service,
+            self.actualizar_ui_completo,
+            page
+        )
+        # Añadir esta línea para crear la vista de recetas
+        self.vista_recetas = crear_vista_recetas(
+            self.recetas_service,
+            self.backend_service, # Para obtener el menú
+            self.inventory_service, # Para obtener ingredientes
             self.actualizar_ui_completo,
             page
         )
@@ -1010,7 +1071,7 @@ class RestauranteGUI:
                 ),
                 ft.Tab(
                     text="Recetas",
-                    icon=ft.Icons.BOOK,
+                    icon=ft.Icons.BOOKMARK_BORDER, # Elige un icono adecuado
                     content=self.vista_recetas
                 ),
                 ft.Tab(
@@ -1096,8 +1157,11 @@ class RestauranteGUI:
             self.vista_admin.actualizar_lista_clientes()
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
+        # --- AÑADIR ESTA LÍNEA ---
+        if hasattr(self.vista_recetas, 'actualizar_datos'):
+            self.vista_recetas.actualizar_datos()
+        # --- FIN AÑADIR ESTA LÍNEA ---
         self.page.update()
-        
         if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
     # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
             pass # Opcional, dependiendo de la lógica de la vista de reservas

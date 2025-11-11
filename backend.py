@@ -9,24 +9,21 @@ from psycopg2.extras import RealDictCursor
 import json
 from datetime import datetime, date, timedelta
 
-
-
-
-
 # IMPORTAR LA SUB-APP DE INVENTARIO
 from inventario_backend import inventario_app
-from recetas_backend import recetas_app
 from configuraciones_backend import configuraciones_app
 from fastapi import Query 
 from fastapi import FastAPI, HTTPException, Depends, Query # Asegúrate de tener Query importado
+from recetas_backend import recetas_app
 
 
 app = FastAPI(title="RestaurantIA Backend")
 
 # Montar la sub-app de inventario
 app.mount("/inventario", inventario_app)
-app.mount("/recetas", recetas_app)
 app.mount("/configuraciones", configuraciones_app)
+app.mount("/recetas", recetas_app)
+
 
 # Configuración directa de PostgreSQL
 DATABASE_URL = "dbname=restaurant_db user=postgres password=postgres host=localhost port=5432"
@@ -127,31 +124,45 @@ def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = De
         
         result = cursor.fetchone()
         
-        # ✅ RESTAR INGREDIENTES DE LAS RECETAS (SOLO SI TIENEN RECETA)
+        # --- NUEVA LÓGICA: CONSUMIR INGREDIENTES DE LAS RECETAS (MANEJANDO CANTIDAD DEL PEDIDO) ---
+        # Suponiendo que 'cursor' es el cursor de la conexión activa en crear_pedido
+        # Agrupar items por nombre para calcular cantidades totales
+        items_agrupados = {}
         for item in pedido.items:
             nombre_item = item['nombre']
-            try:
+            if nombre_item in items_agrupados:
+                items_agrupados[nombre_item] += 1
+            else:
+                items_agrupados[nombre_item] = 1
+
+        for nombre_item, cantidad_pedido in items_agrupados.items():
+            # Buscar si el ítem del pedido tiene una receta asociada
+            cursor.execute("""
+                SELECT r.id
+                FROM recetas r
+                WHERE r.nombre_plato = %s
+            """, (nombre_item,))
+            receta = cursor.fetchone()
+            if receta:
+                # Si tiene receta, obtener los ingredientes necesarios
                 cursor.execute("""
-                    SELECT r.id
-                    FROM recetas r
-                    WHERE r.nombre = %s
-                """, (nombre_item,))
-                receta = cursor.fetchone()
-                if receta:
+                    SELECT ir.ingrediente_id, ir.cantidad_necesaria
+                    FROM ingredientes_recetas ir
+                    WHERE ir.receta_id = %s
+                """, (receta['id'],))
+                for ing in cursor.fetchall():
+                    # Calcular cantidad total a consumir basada en la cantidad del pedido
+                    cantidad_a_consumir = ing['cantidad_necesaria'] * cantidad_pedido
+                    # Restar la cantidad necesaria del inventario
+                    # OJO: Esta operación simple puede causar cantidades negativas si no hay suficiente stock.
+                    # En una implementación robusta, se debería verificar el stock antes de restar
+                    # o manejar el error si la cantidad disponible es menor que la necesaria.
                     cursor.execute("""
-                        SELECT ir.ingrediente_id, ir.cantidad_necesaria
-                        FROM ingredientes_recetas ir
-                        WHERE ir.receta_id = %s
-                    """, (receta['id'],))
-                    for ing in cursor.fetchall():
-                        cursor.execute("""
-                            UPDATE inventario
-                            SET cantidad_disponible = cantidad_disponible - %s
-                            WHERE id = %s
-                        """, (ing['cantidad_necesaria'], ing['ingrediente_id']))
-            except Exception:
-                # ✅ SI NO EXISTE LA TABLA O HAY ERROR, CONTINUAR IGUAL
-                pass
+                        UPDATE inventario
+                        SET cantidad_disponible = cantidad_disponible - %s
+                        WHERE id = %s
+                    """, (cantidad_a_consumir, ing['ingrediente_id']))
+        # --- FIN NUEVA LÓGICA ---
         
         conn.commit()
         # ✅ CORREGIDO: Convertir datetime a string si es necesario
@@ -411,27 +422,6 @@ def actualizar_pedido(pedido_id: int, pedido_actualizado: PedidoCreate, conn: ps
             pedido_id
         ))
         
-        # ✅ RESTAR INGREDIENTES DE LAS RECETAS (SOLO SI TIENEN RECETA)
-        for item in pedido_actualizado.items:
-            nombre_item = item['nombre']
-            cursor.execute("""
-                SELECT r.id
-                FROM recetas r
-                WHERE r.nombre = %s
-            """, (nombre_item,))
-            receta = cursor.fetchone()
-            if receta:
-                cursor.execute("""
-                    SELECT ir.ingrediente_id, ir.cantidad_necesaria
-                    FROM ingredientes_recetas ir
-                    WHERE ir.receta_id = %s
-                """, (receta['id'],))
-                for ing in cursor.fetchall():
-                    cursor.execute("""
-                        UPDATE inventario
-                        SET cantidad_disponible = cantidad_disponible - %s
-                        WHERE id = %s
-                    """, (ing['cantidad_necesaria'], ing['ingrediente_id']))
         
         conn.commit()
         return {"status": "ok", "message": "Pedido actualizado"}

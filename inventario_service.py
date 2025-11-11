@@ -18,10 +18,12 @@ class InventoryService:
 
     # === MÉTODO: agregar_item_inventario ===
     # Agrega un nuevo ítem al inventario en el backend.
-
+    # ✅ TRANSFORMA EL NOMBRE PARA QUE TENGA LA PRIMERA LETRA EN MAYÚSCULA
     def agregar_item_inventario(self, nombre: str, cantidad: int, unidad: str = "unidad") -> Dict[str, Any]:
+        # Transformar el nombre: primera letra mayúscula, resto minúsculas
+        nombre_formateado = nombre.strip().capitalize()
         payload = {
-            "nombre": nombre,
+            "nombre": nombre_formateado, # ✅ USAR EL NOMBRE FORMATEADO
             "cantidad_disponible": cantidad,
             "unidad_medida": unidad
         }
@@ -31,7 +33,7 @@ class InventoryService:
 
     # === MÉTODO: actualizar_item_inventario ===
     # Actualiza la cantidad y unidad de un ítem existente en el inventario.
-
+    # Opcional: También puedes aplicar la transformación aquí si se edita el nombre
     def actualizar_item_inventario(self, item_id: int, cantidad: int, unidad: str = "unidad") -> Dict[str, Any]:
         payload = {
             "cantidad_disponible": cantidad,

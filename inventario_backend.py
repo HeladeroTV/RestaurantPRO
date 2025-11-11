@@ -1,9 +1,13 @@
+# inventario_backend.py
+# Backend API para gestionar el inventario de ingredientes.
+
 from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 from typing import List
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Configuración directa de PostgreSQL
 DATABASE_URL = "dbname=restaurant_db user=postgres password=postgres host=localhost port=5432"
 
 def get_db():
@@ -33,7 +37,6 @@ class InventarioResponse(BaseModel):
 # NUEVA API PARA INVENTARIO
 inventario_app = FastAPI(title="Inventory API")
 
-# CORREGIDO: Cambié "/inventario" por "/" para que al montar en /inventario, sea /inventario/
 @inventario_app.get("/", response_model=List[InventarioResponse])
 def obtener_inventario(conn: psycopg2.extensions.connection = Depends(get_db)):
     with conn.cursor() as cursor:
@@ -98,8 +101,29 @@ def actualizar_item_inventario(item_id: int, update_data: InventarioUpdate, conn
 @inventario_app.delete("/{item_id}")
 def eliminar_item_inventario(item_id: int, conn: psycopg2.extensions.connection = Depends(get_db)):
     with conn.cursor() as cursor:
-        cursor.execute("DELETE FROM inventario WHERE id = %s", (item_id,))
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Ítem no encontrado")
-        conn.commit()
-        return {"status": "ok"}
+        try:
+            # Primero, verificar si el ítem existe
+            cursor.execute("SELECT id FROM inventario WHERE id = %s", (item_id,))
+            item = cursor.fetchone()
+            if not item:
+                raise HTTPException(status_code=404, detail="Ítem no encontrado")
+
+            # Intentar eliminar el ítem
+            cursor.execute("DELETE FROM inventario WHERE id = %s", (item_id,))
+            conn.commit()
+
+            return {"status": "ok", "message": "Ítem eliminado"}
+
+        except psycopg2.IntegrityError as e:
+            # Capturar el error de integridad referencial (clave foránea)
+            conn.rollback() # Revertir la transacción fallida
+            if 'ingredientes_recetas' in str(e): # Verificar si el error está relacionado con la tabla de recetas
+                raise HTTPException(status_code=400, detail=f"El ingrediente no se puede eliminar porque está siendo usado en una o más recetas.")
+            else:
+                # Otra restricción violada
+                raise HTTPException(status_code=500, detail="Error interno del servidor al eliminar el ítem.")
+        except Exception as e:
+            # Capturar cualquier otro error inesperado
+            conn.rollback()  # Revertir la transacción en caso de error
+            print(f"Error en eliminar_item_inventario: {e}")  # Imprimir el error en los logs del servidor
+            raise HTTPException(status_code=500, detail=f"Error interno del servidor al eliminar el ítem: {str(e)}")
