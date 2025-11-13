@@ -17,9 +17,8 @@ from reportes_view import crear_vista_reportes
 from caja_view import crear_vista_caja # <-- IMPORTAR LA NUEVA VISTA DE CAJA
 from reservas_view import crear_vista_reservas
 from reservas_service import ReservasService # Asumiendo que creas este archivo
-from recetas_view import crear_vista_recetas
-from recetas_service import RecetasService
-from recetas_backend import recetas_app # Si usas recetas_app
+from recetas_service import RecetasService # Asumiendo que está importado
+from recetas_backend import recetas_app # Asumiendo que usas recetas_app
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -97,7 +96,6 @@ def crear_selector_item(menu):
         search_field,
         items_dropdown
     ], spacing=10)
-
     container.tipo_dropdown = tipo_dropdown
     container.search_field = search_field
     container.items_dropdown = items_dropdown
@@ -144,35 +142,37 @@ def crear_mesas_grid(backend_service, on_select):
 
     grid = ft.GridView(
         expand=1,
-        runs_count=2,
-        max_extent=200,
+        runs_count=3,
+        max_extent=220, # Ajustar tamaño máximo de la carta
         child_aspect_ratio=1.0,
-        spacing=10,
-        run_spacing=10,
-        padding=10,
+        spacing=15, # Ajustar espaciado
+        run_spacing=15,
+        padding=15,
     )
 
     for mesa in mesas_fisicas:
         if mesa["numero"] == 99:
             continue
-
         # Manejar claves de reserva de forma segura
         ocupada = mesa.get("ocupada", False) # Usar .get() con valor por defecto
         reservada = mesa.get("reservada", False) # Usar .get() con valor por defecto
         cliente_reservado_nombre = mesa.get("cliente_reservado_nombre", "N/A") # Usar .get() con valor por defecto
         fecha_hora_reserva = mesa.get("fecha_hora_reserva", "N/A") # Usar .get() con valor por defecto
 
-        # Determinar color y estado basado en ocupada y reservada
+        # Determinar color y estado basado en ocupada y reservada (COLORES ORIGINALES)
         if ocupada:
-            color = ft.Colors.RED_700
+            color_base = ft.Colors.RED_700
+            color_estado = ft.Colors.RED_700 # Color para hover
             estado = "OCUPADA"
             detalle = ""
         elif reservada:
-            color = ft.Colors.BLUE_700 # Color para mesa reservada
+            color_base = ft.Colors.BLUE_700 # Color para mesa reservada
+            color_estado = ft.Colors.BLUE_700 # Color para hover
             estado = "RESERVADA"
             detalle = f"{cliente_reservado_nombre}\n{fecha_hora_reserva}"
         else:
-            color = ft.Colors.GREEN_700
+            color_base = ft.Colors.GREEN_700
+            color_estado = ft.Colors.GREEN_700 # Color para hover
             estado = "LIBRE"
             detalle = ""
 
@@ -196,17 +196,32 @@ def crear_mesas_grid(backend_service, on_select):
         if detalle:
             contenido_mesa.controls.append(ft.Text(detalle, size=10, color=ft.Colors.WHITE, italic=True))
 
-        grid.controls.append(
-            ft.Container(
-                key=f"mesa-{mesa['numero']}",
-                bgcolor=color,
-                border_radius=10,
-                padding=15,
-                ink=True,
-                on_click=lambda e, num=mesa['numero']: on_select(num),
-                content=contenido_mesa
-            )
+        # Carta de Mesa con efectos de hover (USANDO EL COLOR DEL ESTADO COMO FONDO)
+        carta_mesa = ft.Container(
+            key=f"mesa-{mesa['numero']}",
+            bgcolor=color_base, # ✅ USAR EL COLOR DEL ESTADO COMO FONDO
+            border_radius=15, # Bordes más redondeados
+            padding=15,
+            ink=True,
+            on_click=lambda e, num=mesa['numero']: on_select(num),
+            content=contenido_mesa,
+            # Efectos de hover - AHORA USANDO EL COLOR DEL ESTADO
+            animate=ft.Animation(200, "easeOut"),
+            animate_scale=ft.Animation(200, "easeOut"),
         )
+
+        def on_hover_mesa(e, carta=carta_mesa, color_base=color_base, color_estado=color_estado):
+            if e.data == "true":
+                carta.scale = 1.05 # Aumentar tamaño ligeramente
+                carta.bgcolor = color_estado # Cambiar a color del estado al hacer hover
+            else:
+                carta.scale = 1.0
+                carta.bgcolor = color_base # Volver al color base
+            carta.update()
+
+        carta_mesa.on_hover = lambda e, carta=carta_mesa, color_base=color_base, color_estado=color_estado: on_hover_mesa(e, carta, color_base, color_estado)
+
+        grid.controls.append(carta_mesa)
 
     # Mesa virtual (sin cambios)
     contenido_mesa_virtual = ft.Column(
@@ -225,32 +240,48 @@ def crear_mesas_grid(backend_service, on_select):
             ft.Text("Siempre disponible", size=10, color=ft.Colors.WHITE),
         ]
     )
-    grid.controls.append(
-        ft.Container(
-            key="mesa-99",
-            bgcolor=ft.Colors.BLUE_700,
-            border_radius=10,
-            padding=15,
-            ink=True,
-            on_click=lambda e: on_select(99),
-            width=200,
-            height=120,
-            content=contenido_mesa_virtual
-        )
+    carta_mesa_virtual = ft.Container(
+        key="mesa-99",
+        bgcolor=ft.Colors.BLUE_700,
+        border_radius=15,
+        padding=15,
+        ink=True,
+        on_click=lambda e: on_select(99),
+        width=220,
+        height=150, # Ajustar altura
+        content=contenido_mesa_virtual,
+        animate=ft.Animation(200, "easeOut"),
+        animate_scale=ft.Animation(200, "easeOut"),
     )
+
+    def on_hover_mesa_virtual(e, carta=carta_mesa_virtual, color_base=ft.Colors.BLUE_700):
+        if e.data == "true":
+            carta.scale = 1.05
+            carta.bgcolor = ft.Colors.BLUE_800 # Color más oscuro al hacer hover
+        else:
+            carta.scale = 1.0
+            carta.bgcolor = color_base
+        carta.update()
+
+    carta_mesa_virtual.on_hover = lambda e, carta=carta_mesa_virtual: on_hover_mesa_virtual(e, carta)
+
+    grid.controls.append(carta_mesa_virtual)
 
     return grid
 
 # === FUNCIÓN: crear_panel_gestion ===
 # Crea el panel lateral para gestionar pedidos de una mesa seleccionada.
-def crear_panel_gestion(backend_service, menu, on_update_ui, page):
+def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color, primary_dark_color): # Añadir los parámetros
     estado = {"mesa_seleccionada": None, "pedido_actual": None}
+
     mesa_info = ft.Text("", size=16, weight=ft.FontWeight.BOLD)
+
     tamaño_grupo_input = ft.TextField(
         label="Tamaño del grupo",
         input_filter=ft.NumbersOnlyInputFilter(),
         prefix_icon=ft.Icons.PEOPLE
     )
+
     # Campo de texto para la nota
     nota_pedido = ft.TextField(
         label="Notas del pedido",
@@ -259,6 +290,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         hint_text="Ej: Sin cebolla, sin salsa, etc.",
         width=400
     )
+
     selector_item = crear_selector_item(menu)
 
     # --- NUEVO: Selector de Cantidad ---
@@ -271,27 +303,46 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
     )
     # --- FIN NUEVO ---
 
+    # --- BOTONES CON EFECTOS DE HOVER ESTILIZADOS ---
     asignar_btn = ft.ElevatedButton(
         text="Asignar Cliente",
         disabled=True,
-        style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
+        # Usar colores del tema principal para hover
+        style=ft.ButtonStyle(
+            color={"": "white"},
+            bgcolor={"": ft.Colors.GREEN_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+        ),
     )
+
     agregar_item_btn = ft.ElevatedButton(
         text="Agregar Item",
         disabled=True,
-        style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE)
+        style=ft.ButtonStyle(
+            color={"": "white"},
+            bgcolor={"": ft.Colors.BLUE_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+        ),
     )
+
     eliminar_ultimo_btn = ft.ElevatedButton(
         text="Eliminar último ítem",
         disabled=True,
-        style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
+        style=ft.ButtonStyle(
+            color={"": "white"},
+            bgcolor={"": ft.Colors.RED_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+        ),
     )
+
     # Nuevo botón: Confirmar Pedido
     confirmar_pedido_btn = ft.ElevatedButton(
         text="Confirmar Pedido",
         disabled=True,
-        style=ft.ButtonStyle(bgcolor=ft.Colors.AMBER_700, color=ft.Colors.WHITE)
+        style=ft.ButtonStyle(
+            color={"": "white"},
+            bgcolor={"": ft.Colors.AMBER_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+        ),
     )
+    # --- FIN BOTONES ---
+
     resumen_pedido = ft.Text("", size=14)
 
     def actualizar_estado_botones():
@@ -333,11 +384,9 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         else:
             cantidad_dropdown.disabled = True
         page.update()
-
     # Asignar la función al cambio de selección en el dropdown de ítems
     selector_item.items_dropdown.on_change = on_item_selected
     # --- FIN ACTUALIZACIÓN ---
-
 
     def seleccionar_mesa_interna(numero_mesa):
         try:
@@ -388,7 +437,9 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                     mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Sin fecha)"
             else: # Mesa libre
                 mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
+
             # ... (resto del código de seleccionar_mesa_interna)
+
             resumen_pedido.value = ""
             nota_pedido.value = ""
             actualizar_estado_botones()
@@ -400,6 +451,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         mesa_seleccionada = estado["mesa_seleccionada"]
         if not mesa_seleccionada:
             return
+
         # Re-validar estado antes de asignar (por si cambió desde que se seleccionó)
         mesas_actualizadas = backend_service.obtener_mesas()
         mesa_estado_actual = next((m for m in mesas_actualizadas if m["numero"] == mesa_seleccionada["numero"]), None)
@@ -449,6 +501,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         pedido_actual = estado["pedido_actual"]
         if not mesa_seleccionada or not pedido_actual:
             return
+
         item = selector_item.get_selected_item()
         if not item:
             return
@@ -515,6 +568,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
         pedido_actual = estado["pedido_actual"]
         if not pedido_actual:
             return
+
         try:
             if pedido_actual["id"] is None:
                 # ✅ SOLO ACTUALIZAR EN MEMORIA (NO TIENE ID)
@@ -552,6 +606,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
             return
         if not pedido_actual.get("items"):
             return  # ✅ No confirmar si no tiene ítems
+
         try:
             nota_a_guardar = nota_pedido.value.strip() if nota_pedido.value else ""  # ✅ ASEGURAR QUE NO SEA None
             if pedido_actual["id"] is None:
@@ -572,6 +627,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page):
                     "Pendiente",
                     nota_a_guardar  # ✅ ENVIAR NOTA
                 )
+
             # Reiniciar el selector de cantidad
             cantidad_dropdown.value = "1"
             cantidad_dropdown.disabled = True
@@ -670,6 +726,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
 
         origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
         nota = f"Notas: {pedido.get('notas', 'Ninguna')}"
+
         return ft.Container(
             content=ft.Column([
                 ft.Row([
@@ -729,6 +786,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
     )
     nombre_item = ft.TextField(label="Nombre de item", width=250)
     precio_item = ft.TextField(label="Precio", width=250)
+
     tipo_item_eliminar = ft.Dropdown(
         label="Tipo item (Eliminar)",
         options=[ft.dropdown.Option(tipo) for tipo in tipos],
@@ -760,6 +818,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
             return
         if precio <= 0:
             return
+
         try:
             # Usar el nuevo método del backend
             backend_service.agregar_item_menu(nombre, precio, tipo)
@@ -772,6 +831,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         nombre = item_eliminar.value
         if not tipo or not nombre:
             return
+
         try:
             # Usar el nuevo método del backend
             backend_service.eliminar_item_menu(nombre, tipo)
@@ -829,6 +889,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         celular = celular_cliente.value
         if not nombre or not domicilio or not celular:
             return
+
         try:
             backend_service.agregar_cliente(nombre, domicilio, celular)
             nombre_cliente.value = ""
@@ -928,21 +989,17 @@ class RestauranteGUI:
         # --- FIN VARIABLES ---
         self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
         self.vista_reservas = None # Añadir esta línea
-        
-        
-    # --- NUEVA FUNCIÓN: toggle_detalle_stock_bajo ---
-    # Alterna la visibilidad del detalle de ingredientes bajos.
-    def toggle_detalle_stock_bajo(self, e):
-        """Alterna la visibilidad del panel de detalles de stock bajo."""
-        self.mostrar_detalle_stock = not self.mostrar_detalle_stock
-        print(f"Detalle stock bajo mostrado: {self.mostrar_detalle_stock}") # Mensaje de depuración
-        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
-        # Asegurarse de que la actualización no interfiera con otros procesos
-        # Es mejor llamar a una función específica de actualización de este componente
-        # pero para simplicidad y seguridad, usaremos actualizar_ui_completo
-        # Opcional: Crear una función específica como actualizar_detalle_stock()
-        # self.actualizar_detalle_stock() # <-- Opción más específica
-        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
+
+        # --- COLORES ESTÉTICOS ---
+        self.PRIMARY = "#6366f1"
+        self.PRIMARY_DARK = "#4f46e5"
+        self.ACCENT = "#f59e0b"
+        self.SUCCESS = "#10b981"
+        self.DANGER = "#ef4444"
+        self.CARD_BG = "#1a1f35"
+        self.CARD_HOVER = "#252b45"
+        # --- FIN COLORES ESTÉTICOS ---
+
 
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
@@ -991,62 +1048,22 @@ class RestauranteGUI:
         # ✅ INICIAR HILO DE VERIFICACIÓN DE STOCK
         self.hilo_verificacion_stock = threading.Thread(target=verificar_stock_periodicamente, daemon=True)
         self.hilo_verificacion_stock.start()
-        
-        
-    # --- NUEVA FUNCIÓN: mostrar_detalles_stock_bajo ---
-    # Muestra un AlertDialog con la lista de ingredientes bajos.
-    def mostrar_detalles_stock_bajo(self, e):
-        """Muestra una alerta con los detalles de los ingredientes bajos."""
-        print("Función mostrar_detalles_stock_bajo llamada.") # Mensaje de depuración
-        # Asegurarse de que haya ingredientes bajos para mostrar
-        if self.hay_stock_bajo and self.ingredientes_bajos_lista:
-            print(f"Mostrando alerta para: {self.ingredientes_bajos_lista}") # Mensaje de depuración
-            nombres_bajos = ", ".join(self.ingredientes_bajos_lista)
-            # MOSTRAR VENTANA MODAL DE ALERTA
-            def cerrar_alerta(e):
-                print("Cerrando alerta de stock.") # Mensaje de depuración
-                # Cerrar la alerta
-                if self.page.dialog:
-                    self.page.dialog.open = False
-                    # self.page.update() # Opcional: Intentar update aquí también
-                # No es necesario marcar la bandera como cerrada aquí,
-                # porque la bandera controla la *visualización persistente* del banner,
-                # no la apertura del diálogo en sí.
-                # self.alerta_stock_abierta = False # <-- COMENTAR ESTO
 
-            # Crear el AlertDialog
-            dlg_alerta = ft.AlertDialog(
-                title=ft.Text("⚠️ Detalles de Inventario Bajo"),
-                content=ft.Text(f"Los siguientes ingredientes están por debajo del umbral:\n\n{nombres_bajos}\n\nCantidad mínima: 5"),
-                actions=[
-                    ft.TextButton("Aceptar", on_click=cerrar_alerta)
-                ],
-                actions_alignment=ft.MainAxisAlignment.END,
-                bgcolor=ft.Colors.RED_800,  # <-- FONDO ROJO
-                content_padding=ft.padding.all(20),
-                actions_padding=ft.padding.all(10),
-            )
-
-            # Asignar el diálogo a la página y marcarlo como abierto
-            self.page.dialog = dlg_alerta
-            dlg_alerta.open = True
-            print("Diálogo asignado y marcado como abierto. Actualizando página...") # Mensaje de depuración
-
-            # Actualizar la página para que se muestre el diálogo
-            # Usar run_thread puede no ser necesario aquí, ya que estamos en el hilo de UI
-            # pero si falla, podemos probarlo.
-            # self.page.run_thread(lambda: self.page.update()) # Opción 1: En hilo separado
-            self.page.update() # Opción 2: Directamente
-            print("Página actualizada, debería verse la alerta.") # Mensaje de depuración
-        else:
-            print("No hay ingredientes bajos para mostrar en la alerta.") # Mensaje de depuración
-
+    # --- NUEVA FUNCIÓN: toggle_detalle_stock_bajo ---
+    # Alterna la visibilidad del detalle de ingredientes bajos.
+    def toggle_detalle_stock_bajo(self, e):
+        """Alterna la visibilidad del panel de detalles de stock bajo."""
+        self.mostrar_detalle_stock = not self.mostrar_detalle_stock
+        print(f"Detalle stock bajo mostrado: {self.mostrar_detalle_stock}") # Mensaje de depuración
+        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
+        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
 
     def main(self, page: ft.Page):
         self.page = page
         page.title = "Sistema Restaurante Profesional"
         page.padding = 0
         page.theme_mode = "dark"
+        page.bgcolor = "#0a0e1a" # Aplicar color de fondo oscuro principal
         reloj = ft.Text("", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.AMBER_200)
 
         # --- INDICADOR PRINCIPAL DE STOCK BAJO (Botón) ---
@@ -1055,7 +1072,7 @@ class RestauranteGUI:
                 ft.Icon(ft.Icons.WARNING, color=ft.Colors.WHITE, size=20),
                 ft.Text("Stock Bajo", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD)
             ], alignment=ft.MainAxisAlignment.CENTER, spacing=5),
-            bgcolor=ft.Colors.RED_800,
+            bgcolor=self.DANGER, # Usar color de peligro para el indicador
             padding=5,
             border_radius=5,
             width=120,
@@ -1077,13 +1094,13 @@ class RestauranteGUI:
                     height=100, # Altura fija para el panel
                     width=200,  # Ancho fijo para el panel
                     auto_scroll=False,
-                    # bgcolor=ft.Colors.RED_900,  # <-- ❌ ESTE ARGUMENTO NO ES VÁLIDO
-                    # border_radius=5,            # <-- ❌ ESTE ARGUMENTO TAMPOCO ES VÁLIDO
+                    # bgcolor=ft.Colors.RED_900,  # <-- ❌ ESTE ARGUMENTO NO ES VÁLIDO EN ListView
+                    # border_radius=5,            # <-- ❌ ESTE ARGUMENTO TAMPOCO ES VÁLIDO EN ListView
                 )
             ], spacing=5),
-            bgcolor=ft.Colors.RED_900,  # <-- ✅ ESTILO APLICADO AL CONTENEDOR PADRE
+            bgcolor=self.CARD_BG,  # Usar color base de carta
             padding=10,
-            border_radius=5,            # <-- ✅ ESTILO APLICADO AL CONTENEDOR PADRE
+            border_radius=5,
             visible=False, # Inicialmente oculto, se controla en actualizar_ui_completo
             width=220, # Ancho del panel
             # No usar ink=True aquí, solo el botón principal debe ser clickeable
@@ -1109,7 +1126,7 @@ class RestauranteGUI:
             self.menu_cache = []
 
         self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
-        self.panel_gestion = crear_panel_gestion(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
+        self.panel_gestion = crear_panel_gestion(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page, self.PRIMARY, self.PRIMARY_DARK)
         self.vista_cocina = crear_vista_cocina(self.backend_service, self.actualizar_ui_completo, page)
         self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
@@ -1231,7 +1248,6 @@ class RestauranteGUI:
 
         # Vincular la función de actualización de visibilidad a la clase para usarla en actualizar_ui_completo
         self.actualizar_visibilidad_alerta = actualizar_visibilidad_alerta
-        
 
     def crear_vista_mesera(self):
         return ft.Container(
@@ -1260,18 +1276,6 @@ class RestauranteGUI:
         if self.panel_gestion:
             self.panel_gestion.seleccionar_mesa(numero_mesa)
 
-    def actualizar_lista_inventario(self):
-        """Llama a actualizar_lista de la vista de inventario solo si no hay campo en edición."""
-        if hasattr(self.vista_inventario, 'campo_en_edicion_id') and hasattr(self.vista_inventario, 'actualizar_lista'):
-            # Verificar si hay un campo en edición en la vista de inventario
-            if getattr(self.vista_inventario, 'campo_en_edicion_id', None) is not None:
-                print("Hay un campo en edición en la vista de inventario, se omite la actualización.")
-                return # Salir sin actualizar la lista
-        # Si no hay campo en edición o no se puede verificar, llamar a actualizar_lista
-        if hasattr(self.vista_inventario, 'actualizar_lista'):
-            self.vista_inventario.actualizar_lista()
-    
-    
     def actualizar_ui_completo(self):
         nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
         self.mesas_grid.controls = nuevo_grid.controls
@@ -1292,6 +1296,19 @@ class RestauranteGUI:
         self.page.update()
         if hasattr(self.vista_reservas, 'cargar_clientes_mesas'):
             pass # Opcional, dependiendo de la lógica de la vista de reservas
+
+    # --- FUNCIÓN: actualizar_lista_inventario ---
+    # Actualiza la lista de inventario solo si no hay campo en edición.
+    def actualizar_lista_inventario(self):
+        """Llama a actualizar_lista de la vista de inventario solo si no hay campo en edición."""
+        if hasattr(self.vista_inventario, 'campo_en_edicion_id') and hasattr(self.vista_inventario, 'actualizar_lista'):
+            # Verificar si hay un campo en edición en la vista de inventario
+            if getattr(self.vista_inventario, 'campo_en_edicion_id', None) is not None:
+                print("Hay un campo en edición en la vista de inventario, se omite la actualización.")
+                return # Salir sin actualizar la lista
+        # Si no hay campo en edición o no se puede verificar, llamar a actualizar_lista
+        if hasattr(self.vista_inventario, 'actualizar_lista'):
+            self.vista_inventario.actualizar_lista()
 
 def main():
     app = RestauranteGUI()
