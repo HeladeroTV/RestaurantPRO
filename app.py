@@ -772,9 +772,6 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
     vista.actualizar = actualizar
     return vista
 
-# === FUNCIÓN: crear_vista_admin ===
-# Vista de administración para gestionar menú y clientes.
-# (Esta función se mantiene exactamente como estaba en tu app.py original)
 def crear_vista_admin(backend_service, menu, on_update_ui, page):
     tipos = list(set(item["tipo"] for item in menu))
     tipos.sort()
@@ -842,14 +839,17 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
     # Campos para clientes
     nombre_cliente = ft.TextField(label="Nombre", width=300)
     domicilio_cliente = ft.TextField(label="Domicilio", width=300)
+    # --- CAMBIO 2: Restringir celular a 10 números ---
     celular_cliente = ft.TextField(
         label="Celular",
         width=300,
-        input_filter=ft.NumbersOnlyInputFilter(),
-        prefix_icon=ft.Icons.PHONE
+        input_filter=ft.NumbersOnlyInputFilter(), # Solo números
+        prefix_icon=ft.Icons.PHONE,
+        max_length=10 # Máximo 10 caracteres
     )
+    # --- FIN CAMBIO 2 ---
 
-    # ✅ LISTA DE CLIENTES - CON ESPACIO MÁXIMO HORIZONTAL Y VERTICAL
+    # ✅ LISTA DE CLIENTES - SIN FONDO ESPECÍFICO
     lista_clientes = ft.ListView(
         expand=True,  # ✅ EXPANDIR PARA OCUPAR TODO EL ESPACIO
         spacing=10,
@@ -874,7 +874,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
                             style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
                         )
                     ]),
-                    bgcolor=ft.Colors.BLUE_GREY_900,
+                    bgcolor=ft.Colors.BLUE_GREY_900, # El contenedor de cada cliente sí tiene fondo
                     padding=10,
                     border_radius=10
                 )
@@ -894,7 +894,7 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
             backend_service.agregar_cliente(nombre, domicilio, celular)
             nombre_cliente.value = ""
             domicilio_cliente.value = ""
-            celular_cliente.value = ""
+            celular_cliente.value = "" # Limpiar campo
             actualizar_lista_clientes()
         except Exception as ex:
             print(f"Error al agregar cliente: {ex}")
@@ -906,6 +906,8 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         except Exception as ex:
             print(f"Error al eliminar cliente: {ex}")
 
+    # --- CAMBIO 1: QUITAR EL FONDO DEL CONTENEDOR PRINCIPAL ---
+    # La vista ahora no tiene un bgcolor específico, por lo tanto heredará el fondo de la página (page.bgcolor = "#0a0e1a")
     vista = ft.Container(
         content=ft.Column([
             # Sección de menú
@@ -940,20 +942,22 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
             ),
             ft.Divider(),
             ft.Text("Clientes Registrados", size=20, weight=ft.FontWeight.BOLD),
-            # ✅ SECCIÓN SEPARADA PARA CLIENTES REGISTRADOS - OCUPA TODO EL ANCHO
+            # ✅ SECCIÓN SEPARADA PARA CLIENTES REGISTRADOS - SIN FONDO ESPECÍFICO
             ft.Container(
                 content=lista_clientes,
                 expand=True,  # ✅ CONTAINER EXPANDIDO
                 height=500,  # ✅ ALTURA AMPLIA
-                bgcolor=ft.Colors.BLUE_GREY_900,  # ✅ FONDO PARA VER MEJOR
+                # No usar bgcolor aquí para que sea transparente y muestre el fondo de la página
                 padding=10,
                 border_radius=10,
             )
         ], expand=True, scroll="auto"),  # ✅ SCROLL VERTICAL EN LA COLUMNA
         padding=20,
-        bgcolor=ft.Colors.BLUE_GREY_900,
+        # NO USAR bgcolor aquí, se quita para que use el fondo de la página
+        # bgcolor=ft.Colors.BLUE_GREY_900,  # <-- COMENTAR O ELIMINAR ESTA LÍNEA
         expand=True  # ✅ CONTAINER PRINCIPAL EXPANDIDO
     )
+    # --- FIN CAMBIO 1 ---
     vista.actualizar_lista_clientes = actualizar_lista_clientes
     return vista
 
