@@ -19,6 +19,7 @@ from reservas_view import crear_vista_reservas
 from reservas_service import ReservasService # Asumiendo que creas este archivo
 from recetas_view import crear_vista_recetas
 from recetas_service import RecetasService
+from recetas_backend import recetas_app # Si usas recetas_app
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -901,13 +902,16 @@ class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
         from configuraciones_service import ConfiguracionesService
+        # from recetas_service import RecetasService # Asumiendo que está importado arriba
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
         self.config_service = ConfiguracionesService()
+        # self.recetas_service = RecetasService() # Asumiendo que está inicializado
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
         self.vista_cocina = None
+        self.vista_caja = None
         self.vista_admin = None
         self.vista_inventario = None
         self.vista_recetas = None
@@ -916,12 +920,29 @@ class RestauranteGUI:
         self.vista_personalizacion = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
         self.hilo_sincronizacion = None
+        # --- VARIABLES PARA ALERTA DE BAJOS STOCK ---
+        self.hilo_verificacion_stock = None
+        self.hay_stock_bajo = False # Bandera para indicar si hay stock bajo
+        self.ingredientes_bajos_lista = [] # Lista de nombres de ingredientes bajos
+        self.mostrar_detalle_stock = False # Bandera para mostrar/ocultar el detalle
+        # --- FIN VARIABLES ---
         self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
         self.vista_reservas = None # Añadir esta línea
-        self.hilo_sincronizacion = None
-        self.hilo_verificacion_inventario = None  # <-- NUEVA VARIABLE
-        self.recetas_service = RecetasService()
-        self.vista_recetas = None # Añadir esta línea
+        
+        
+    # --- NUEVA FUNCIÓN: toggle_detalle_stock_bajo ---
+    # Alterna la visibilidad del detalle de ingredientes bajos.
+    def toggle_detalle_stock_bajo(self, e):
+        """Alterna la visibilidad del panel de detalles de stock bajo."""
+        self.mostrar_detalle_stock = not self.mostrar_detalle_stock
+        print(f"Detalle stock bajo mostrado: {self.mostrar_detalle_stock}") # Mensaje de depuración
+        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
+        # Asegurarse de que la actualización no interfiera con otros procesos
+        # Es mejor llamar a una función específica de actualización de este componente
+        # pero para simplicidad y seguridad, usaremos actualizar_ui_completo
+        # Opcional: Crear una función específica como actualizar_detalle_stock()
+        # self.actualizar_detalle_stock() # <-- Opción más específica
+        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
 
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
@@ -935,8 +956,9 @@ class RestauranteGUI:
                     print(f"Error en sincronización: {e}")
                     time.sleep(3)
 
-        def verificar_alertas_inventario():
-            """Verifica el inventario cada 30 segundos y muestra alerta si hay ingredientes bajos."""
+        # --- NUEVA FUNCIÓN: verificar_stock_periodicamente ---
+        def verificar_stock_periodicamente():
+            """Verifica el inventario cada 30 segundos y actualiza la bandera."""
             while True:
                 try:
                     items = self.inventory_service.obtener_inventario()
@@ -945,58 +967,128 @@ class RestauranteGUI:
                     umbral_bajo = 5  # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
                     ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
 
-                    # MOSTRAR ALERTA SI HAY INGREDIENTES BAJOS
+                    # Actualizar la bandera y la lista de ingredientes
                     if ingredientes_bajos:
-                        nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
-                        
-                        # MOSTRAR VENTANA MODAL DE ALERTA
-                        def cerrar_alerta(e):
-                            # Cerrar la alerta
-                            if self.page.dialog:
-                                self.page.dialog.open = False
-                                self.page.update()
-
-                        dlg_alerta = ft.AlertDialog(
-                            title=ft.Text("⚠️ Alerta de Inventario", color=ft.Colors.WHITE),
-                            content=ft.Text(f"Los siguientes ingredientes están por debajo del umbral:\n\n{nombres_bajos}\n\nCantidad mínima: {umbral_bajo}", color=ft.Colors.WHITE),
-                            actions=[
-                                ft.TextButton("Aceptar", on_click=cerrar_alerta, style=ft.ButtonStyle(color=ft.Colors.WHITE))
-                            ],
-                            actions_alignment=ft.MainAxisAlignment.END,
-                            bgcolor=ft.Colors.RED_800,
-                            content_padding=ft.padding.all(20),
-                            actions_padding=ft.padding.all(10),
-                        )
-                        
-                        # Mostrar alerta en el hilo principal
-                        def mostrar_alerta():
-                            self.page.dialog = dlg_alerta
-                            dlg_alerta.open = True
-                            self.page.update()
-                        
-                        # Ejecutar en el hilo principal de Flet
-                        self.page.run_thread(mostrar_alerta)
+                        self.hay_stock_bajo = True
+                        self.ingredientes_bajos_lista = [item['nombre'] for item in ingredientes_bajos]
+                        print(f"Bandera de stock bajo activada. Ingredientes: {self.ingredientes_bajos_lista}") # Mensaje de depuración
+                    else:
+                        self.hay_stock_bajo = False
+                        self.ingredientes_bajos_lista = []
+                        # Si no hay stock bajo, ocultar el detalle
+                        self.mostrar_detalle_stock = False
+                        print("Bandera de stock bajo desactivada.") # Mensaje de depuración
                     
                     time.sleep(30)  # VERIFICAR CADA 30 SEGUNDOS
                 except Exception as e:
-                    print(f"Error en verificación periódica de inventario: {e}")
+                    print(f"Error en verificación periódica de inventario (stock): {e}")
                     time.sleep(30)  # ESPERAR 30 SEGUNDOS ANTES DE REINTENTAR
 
         # ✅ INICIAR HILO DE SINCRONIZACIÓN GENERAL
         self.hilo_sincronizacion = threading.Thread(target=actualizar_periodicamente, daemon=True)
         self.hilo_sincronizacion.start()
 
-        # ✅ INICIAR HILO DE VERIFICACIÓN DE INVENTARIO
-        self.hilo_verificacion_inventario = threading.Thread(target=verificar_alertas_inventario, daemon=True)
-        self.hilo_verificacion_inventario.start()
+        # ✅ INICIAR HILO DE VERIFICACIÓN DE STOCK
+        self.hilo_verificacion_stock = threading.Thread(target=verificar_stock_periodicamente, daemon=True)
+        self.hilo_verificacion_stock.start()
+        
+        
+    # --- NUEVA FUNCIÓN: mostrar_detalles_stock_bajo ---
+    # Muestra un AlertDialog con la lista de ingredientes bajos.
+    def mostrar_detalles_stock_bajo(self, e):
+        """Muestra una alerta con los detalles de los ingredientes bajos."""
+        print("Función mostrar_detalles_stock_bajo llamada.") # Mensaje de depuración
+        # Asegurarse de que haya ingredientes bajos para mostrar
+        if self.hay_stock_bajo and self.ingredientes_bajos_lista:
+            print(f"Mostrando alerta para: {self.ingredientes_bajos_lista}") # Mensaje de depuración
+            nombres_bajos = ", ".join(self.ingredientes_bajos_lista)
+            # MOSTRAR VENTANA MODAL DE ALERTA
+            def cerrar_alerta(e):
+                print("Cerrando alerta de stock.") # Mensaje de depuración
+                # Cerrar la alerta
+                if self.page.dialog:
+                    self.page.dialog.open = False
+                    # self.page.update() # Opcional: Intentar update aquí también
+                # No es necesario marcar la bandera como cerrada aquí,
+                # porque la bandera controla la *visualización persistente* del banner,
+                # no la apertura del diálogo en sí.
+                # self.alerta_stock_abierta = False # <-- COMENTAR ESTO
+
+            # Crear el AlertDialog
+            dlg_alerta = ft.AlertDialog(
+                title=ft.Text("⚠️ Detalles de Inventario Bajo"),
+                content=ft.Text(f"Los siguientes ingredientes están por debajo del umbral:\n\n{nombres_bajos}\n\nCantidad mínima: 5"),
+                actions=[
+                    ft.TextButton("Aceptar", on_click=cerrar_alerta)
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+                bgcolor=ft.Colors.RED_800,  # <-- FONDO ROJO
+                content_padding=ft.padding.all(20),
+                actions_padding=ft.padding.all(10),
+            )
+
+            # Asignar el diálogo a la página y marcarlo como abierto
+            self.page.dialog = dlg_alerta
+            dlg_alerta.open = True
+            print("Diálogo asignado y marcado como abierto. Actualizando página...") # Mensaje de depuración
+
+            # Actualizar la página para que se muestre el diálogo
+            # Usar run_thread puede no ser necesario aquí, ya que estamos en el hilo de UI
+            # pero si falla, podemos probarlo.
+            # self.page.run_thread(lambda: self.page.update()) # Opción 1: En hilo separado
+            self.page.update() # Opción 2: Directamente
+            print("Página actualizada, debería verse la alerta.") # Mensaje de depuración
+        else:
+            print("No hay ingredientes bajos para mostrar en la alerta.") # Mensaje de depuración
+
 
     def main(self, page: ft.Page):
         self.page = page
         page.title = "Sistema Restaurante Profesional"
         page.padding = 0
         page.theme_mode = "dark"
-
         reloj = ft.Text("", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.AMBER_200)
+
+        # --- INDICADOR PRINCIPAL DE STOCK BAJO (Botón) ---
+        indicador_stock_bajo = ft.Container(
+            content=ft.Row([
+                ft.Icon(ft.Icons.WARNING, color=ft.Colors.WHITE, size=20),
+                ft.Text("Stock Bajo", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD)
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=5),
+            bgcolor=ft.Colors.RED_800,
+            padding=5,
+            border_radius=5,
+            width=120,
+            height=30,
+            visible=False, # Inicialmente oculto, se controla en actualizar_ui_completo
+            ink=True, # Para efecto de click
+            on_click=self.toggle_detalle_stock_bajo # Asociar la función de toggle
+        )
+
+        # --- PANEL DESPLEGABLE DE DETALLES ---
+        panel_detalle_stock = ft.Container(
+            content=ft.Column([
+                ft.Text("Ingredientes con bajo stock:", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                # Este ListView se llenará dinámicamente
+                ft.ListView(
+                    controls=[],
+                    spacing=2,
+                    padding=5,
+                    height=100, # Altura fija para el panel
+                    width=200,  # Ancho fijo para el panel
+                    auto_scroll=False,
+                    # bgcolor=ft.Colors.RED_900,  # <-- ❌ ESTE ARGUMENTO NO ES VÁLIDO
+                    # border_radius=5,            # <-- ❌ ESTE ARGUMENTO TAMPOCO ES VÁLIDO
+                )
+            ], spacing=5),
+            bgcolor=ft.Colors.RED_900,  # <-- ✅ ESTILO APLICADO AL CONTENEDOR PADRE
+            padding=10,
+            border_radius=5,            # <-- ✅ ESTILO APLICADO AL CONTENEDOR PADRE
+            visible=False, # Inicialmente oculto, se controla en actualizar_ui_completo
+            width=220, # Ancho del panel
+            # No usar ink=True aquí, solo el botón principal debe ser clickeable
+        )
+        # --- FIN PANEL DESPLEGABLE ---
 
         def actualizar_reloj():
             reloj.value = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1019,21 +1111,12 @@ class RestauranteGUI:
         self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
         self.panel_gestion = crear_panel_gestion(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_cocina = crear_vista_cocina(self.backend_service, self.actualizar_ui_completo, page)
-        # self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- COMENTAR ESTA LINEA (ANTIGUA)
-        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- USAR LA NUEVA VISTA DE caja_view.py
+        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
         self.vista_configuraciones = crear_vista_configuraciones(
             self.config_service,
             self.inventory_service,
-            self.actualizar_ui_completo,
-            page
-        )
-        # Añadir esta línea para crear la vista de recetas
-        self.vista_recetas = crear_vista_recetas(
-            self.recetas_service,
-            self.backend_service, # Para obtener el menú
-            self.inventory_service, # Para obtener ingredientes
             self.actualizar_ui_completo,
             page
         )
@@ -1070,16 +1153,10 @@ class RestauranteGUI:
                     content=self.vista_inventario
                 ),
                 ft.Tab(
-                    text="Recetas",
-                    icon=ft.Icons.BOOKMARK_BORDER, # Elige un icono adecuado
-                    content=self.vista_recetas
-                ),
-                ft.Tab(
                     text="Configuraciones",
                     icon=ft.Icons.SETTINGS,
                     content=self.vista_configuraciones
                 ),
-                
                 ft.Tab(
                     text="Reservas",
                     icon=ft.Icons.CALENDAR_TODAY, # Icono para reservas
@@ -1094,10 +1171,45 @@ class RestauranteGUI:
             expand=1
         )
 
+        # Actualizar visibilidad del indicador y detalle en cada actualización de UI
+        def actualizar_visibilidad_alerta():
+            # Actualizar visibilidad del indicador principal
+            indicador_stock_bajo.visible = self.hay_stock_bajo
+            # Actualizar visibilidad del panel de detalle
+            panel_detalle_stock.visible = self.hay_stock_bajo and self.mostrar_detalle_stock
+            # Actualizar contenido del ListView dentro del panel de detalle
+            lista_detalle = panel_detalle_stock.content.controls[1] # El ListView
+            lista_detalle.controls.clear()
+            if self.hay_stock_bajo:
+                for ingrediente in self.ingredientes_bajos_lista:
+                    lista_detalle.controls.append(
+                        ft.Text(f"- {ingrediente}", size=12, color=ft.Colors.WHITE)
+                    )
+            page.update()
+
+        # Agregar al Stack, ahora con el panel de detalle
         page.add(
             ft.Stack(
                 controls=[
                     tabs,
+                    # --- AÑADIR INDICADOR AL STACK (en la esquina superior derecha) ---
+                    ft.Container(
+                        content=ft.Column([
+                            indicador_stock_bajo,
+                            # Añadir el panel de detalle justo debajo del botón
+                            ft.Container(
+                                content=panel_detalle_stock,
+                                # No usar top/right aquí para el panel, se posiciona relativo al botón
+                                # Una forma es envolver ambos en un Columna vertical
+                                # Pero para posición fija en la esquina, usar coordenadas relativas al Stack
+                                # Mejor: Usar un Positioned o manejarlo en actualizar_visibilidad_alerta
+                                # La forma más simple es dejarlo aquí y que actualizar_visibilidad_alerta lo maneje
+                            )
+                        ], spacing=5), # Espacio entre el botón y el panel
+                        top=10,  # Posición desde arriba para el contenedor padre (botón)
+                        right=10, # Posición desde la derecha para el contenedor padre (botón)
+                    ),
+                    # --- FIN AÑADIR INDICADOR ---
                     ft.Container(
                         content=reloj,
                         left=20,
@@ -1114,6 +1226,11 @@ class RestauranteGUI:
         # ✅ INICIAR SINCRONIZACIÓN AUTOMÁTICA
         self.iniciar_sincronizacion()
         self.actualizar_ui_completo()
+        # Llamar una vez inicialmente para reflejar el estado inicial
+        actualizar_visibilidad_alerta()
+
+        # Vincular la función de actualización de visibilidad a la clase para usarla en actualizar_ui_completo
+        self.actualizar_visibilidad_alerta = actualizar_visibilidad_alerta
         
 
     def crear_vista_mesera(self):
@@ -1161,20 +1278,19 @@ class RestauranteGUI:
         self.mesas_grid.update()
         if hasattr(self.vista_cocina, 'actualizar'):
             self.vista_cocina.actualizar()
-        # if hasattr(self.vista_caja, 'actualizar'): # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
-        #     self.vista_caja.actualizar()
-        if hasattr(self.vista_caja, 'actualizar'): # <-- USAR EL METODO DE LA NUEVA VISTA
+        if hasattr(self.vista_caja, 'actualizar'):
             self.vista_caja.actualizar()
         if hasattr(self.vista_admin, 'actualizar_lista_clientes'):
             self.vista_admin.actualizar_lista_clientes()
         # --- MODIFICACIÓN PARA INVENTARIO ---
-        # if hasattr(self.vista_inventario, 'actualizar_lista'):
-        #     self.vista_inventario.actualizar_lista() # <-- COMENTAR ESTA LINEA
-        self.actualizar_lista_inventario() # <-- USAR EL NUEVO METODO
+        self.actualizar_lista_inventario() # <-- USAR EL NUEVO METODO (asegúrate de tenerlo)
         # --- FIN MODIFICACIÓN ---
+        # --- ACTUALIZAR VISIBILIDAD DEL INDICADOR Y DETALLE ---
+        if hasattr(self, 'actualizar_visibilidad_alerta'):
+            self.actualizar_visibilidad_alerta()
+        # --- FIN ACTUALIZAR VISIBILIDAD ---
         self.page.update()
-        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
-    # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
+        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'):
             pass # Opcional, dependiendo de la lógica de la vista de reservas
 
 def main():
