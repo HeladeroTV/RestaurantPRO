@@ -17,8 +17,9 @@ from reportes_view import crear_vista_reportes
 from caja_view import crear_vista_caja # <-- IMPORTAR LA NUEVA VISTA DE CAJA
 from reservas_view import crear_vista_reservas
 from reservas_service import ReservasService # Asumiendo que creas este archivo
-from recetas_service import RecetasService # Asumiendo que está importado
-from recetas_backend import recetas_app # Asumiendo que usas recetas_app
+# --- AÑADIR ESTOS IMPORTS ---
+from recetas_view import crear_vista_recetas
+from recetas_service import RecetasService
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -967,30 +968,25 @@ class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
         from configuraciones_service import ConfiguracionesService
-        # from recetas_service import RecetasService # Asumiendo que está importado arriba
+        # from recetas_service import RecetasService # <-- YA IMPORTADO ARRIBA
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
         self.config_service = ConfiguracionesService()
-        # self.recetas_service = RecetasService() # Asumiendo que está inicializado
+        self.recetas_service = RecetasService() # <-- AÑADIR ESTA LINEA
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
         self.vista_cocina = None
-        self.vista_caja = None
+        # self.vista_caja = None # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
+        self.vista_caja = None # <-- Asegurar inicialización
         self.vista_admin = None
         self.vista_inventario = None
-        self.vista_recetas = None
+        self.vista_recetas = None # <-- AÑADIR ESTA LINEA
         self.vista_configuraciones = None
         self.vista_reportes = None
         self.vista_personalizacion = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
         self.hilo_sincronizacion = None
-        # --- VARIABLES PARA ALERTA DE BAJOS STOCK ---
-        self.hilo_verificacion_stock = None
-        self.hay_stock_bajo = False # Bandera para indicar si hay stock bajo
-        self.ingredientes_bajos_lista = [] # Lista de nombres de ingredientes bajos
-        self.mostrar_detalle_stock = False # Bandera para mostrar/ocultar el detalle
-        # --- FIN VARIABLES ---
         self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
         self.vista_reservas = None # Añadir esta línea
 
@@ -1130,10 +1126,29 @@ class RestauranteGUI:
             self.menu_cache = []
 
         self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
-        self.panel_gestion = crear_panel_gestion(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page, self.PRIMARY, self.PRIMARY_DARK)
+        # --- PASAR LOS COLORES DEL TEMA PRINCIPAL ---
+        self.panel_gestion = crear_panel_gestion(
+            self.backend_service,
+            self.menu_cache,
+            self.actualizar_ui_completo,
+            page,
+            self.PRIMARY,       # Pasar PRIMARY desde RestauranteGUI
+            self.PRIMARY_DARK   # Pasar PRIMARY_DARK desde RestauranteGUI
+        )
+        # --- FIN PASAR LOS COLORES ---
         self.vista_cocina = crear_vista_cocina(self.backend_service, self.actualizar_ui_completo, page)
-        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
+        # self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- COMENTAR ESTA LINEA (ANTIGUA)
+        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- USAR LA NUEVA VISTA DE caja_view.py
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
+        # --- AÑADIR ESTA LINEA ---
+        self.vista_recetas = crear_vista_recetas(
+            self.recetas_service,      # Servicio de recetas
+            self.backend_service,      # Para obtener menú (platos)
+            self.inventory_service,    # Para obtener ingredientes
+            self.actualizar_ui_completo,
+            page
+        )
+        # --- FIN AÑADIR ESTA LINEA ---
         self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
         self.vista_configuraciones = crear_vista_configuraciones(
             self.config_service,
@@ -1173,6 +1188,14 @@ class RestauranteGUI:
                     icon=ft.Icons.INVENTORY_2,
                     content=self.vista_inventario
                 ),
+                
+                # --- AÑADIR ESTA PESTAÑA ---
+                ft.Tab(
+                    text="Recetas",
+                    icon=ft.Icons.BOOKMARK_BORDER, # Elige un icono adecuado
+                    content=self.vista_recetas
+                ),
+                # --- FIN AÑADIR ESTA PESTAÑA ---
                 ft.Tab(
                     text="Configuraciones",
                     icon=ft.Icons.SETTINGS,
@@ -1286,19 +1309,21 @@ class RestauranteGUI:
         self.mesas_grid.update()
         if hasattr(self.vista_cocina, 'actualizar'):
             self.vista_cocina.actualizar()
-        if hasattr(self.vista_caja, 'actualizar'):
+        # if hasattr(self.vista_caja, 'actualizar'): # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
+        #     self.vista_caja.actualizar()
+        if hasattr(self.vista_caja, 'actualizar'): # <-- USAR EL METODO DE LA NUEVA VISTA
             self.vista_caja.actualizar()
         if hasattr(self.vista_admin, 'actualizar_lista_clientes'):
             self.vista_admin.actualizar_lista_clientes()
-        # --- MODIFICACIÓN PARA INVENTARIO ---
-        self.actualizar_lista_inventario() # <-- USAR EL NUEVO METODO (asegúrate de tenerlo)
-        # --- FIN MODIFICACIÓN ---
-        # --- ACTUALIZAR VISIBILIDAD DEL INDICADOR Y DETALLE ---
-        if hasattr(self, 'actualizar_visibilidad_alerta'):
-            self.actualizar_visibilidad_alerta()
-        # --- FIN ACTUALIZAR VISIBILIDAD ---
+        # --- AÑADIR ESTA LÍNEA ---
+        if hasattr(self.vista_recetas, 'actualizar_datos'):
+            self.vista_recetas.actualizar_datos()
+        # --- FIN AÑADIR ESTA LÍNEA ---
+        if hasattr(self.vista_inventario, 'actualizar_lista'):
+            self.vista_inventario.actualizar_lista()
         self.page.update()
-        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'):
+        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
+    # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
             pass # Opcional, dependiendo de la lógica de la vista de reservas
 
     # --- FUNCIÓN: actualizar_lista_inventario ---
