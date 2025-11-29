@@ -17,14 +17,14 @@ class InventoryService:
         return r.json()
 
     # === MÉTODO: agregar_item_inventario ===
-    # Agrega un nuevo ítem al inventario en el backend.
-    # ✅ TRANSFORMA EL NOMBRE PARA QUE TENGA LA PRIMERA LETRA EN MAYÚSCULA
+    # Agrega un nuevo ítem al inventario en el backend o suma la cantidad si ya existe.
+    # ✅ AHORA SUMA LA CANTIDAD SI EL NOMBRE YA EXISTE
     def agregar_item_inventario(self, nombre: str, cantidad: int, unidad: str = "unidad") -> Dict[str, Any]:
         # Transformar el nombre: primera letra mayúscula, resto minúsculas
         nombre_formateado = nombre.strip().capitalize()
         payload = {
-            "nombre": nombre_formateado, # ✅ USAR EL NOMBRE FORMATEADO
-            "cantidad_disponible": cantidad,
+            "nombre": nombre_formateado,
+            "cantidad_disponible": cantidad, # La cantidad que se va a sumar o insertar
             "unidad_medida": unidad
         }
         r = requests.post(f"{self.base_url}/inventario", json=payload)
@@ -33,7 +33,7 @@ class InventoryService:
 
     # === MÉTODO: actualizar_item_inventario ===
     # Actualiza la cantidad y unidad de un ítem existente en el inventario.
-    # Opcional: También puedes aplicar la transformación aquí si se edita el nombre
+
     def actualizar_item_inventario(self, item_id: int, cantidad: int, unidad: str = "unidad") -> Dict[str, Any]:
         payload = {
             "cantidad_disponible": cantidad,

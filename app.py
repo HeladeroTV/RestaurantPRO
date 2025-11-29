@@ -968,11 +968,11 @@ class RestauranteGUI:
     def __init__(self):
         from backend_service import BackendService
         from configuraciones_service import ConfiguracionesService
-        # from recetas_service import RecetasService # <-- YA IMPORTADO ARRIBA
+        # from recetas_service import RecetasService # Asumiendo que está importado arriba
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
         self.config_service = ConfiguracionesService()
-        self.recetas_service = RecetasService() # <-- AÑADIR ESTA LINEA
+        self.recetas_service = RecetasService() # Añadir si no lo tienes
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
@@ -981,15 +981,18 @@ class RestauranteGUI:
         self.vista_caja = None # <-- Asegurar inicialización
         self.vista_admin = None
         self.vista_inventario = None
-        self.vista_recetas = None # <-- AÑADIR ESTA LINEA
+        self.vista_recetas = None
         self.vista_configuraciones = None
         self.vista_reportes = None
         self.vista_personalizacion = None  # ✅ AGREGAR ESTO
         self.menu_cache = None
         self.hilo_sincronizacion = None
-        self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
-        self.vista_reservas = None # Añadir esta línea
-
+        # --- NUEVAS VARIABLES PARA ALERTA DE BAJOS STOCK ---
+        self.hilo_verificacion_stock = None
+        self.hay_stock_bajo = False # Bandera para indicar si hay stock bajo
+        self.ingredientes_bajos_lista = [] # Lista de nombres de ingredientes bajos
+        self.mostrar_detalle_stock = False # Bandera para mostrar/ocultar el detalle
+        # --- FIN NUEVAS VARIABLES ---
         # --- COLORES ESTÉTICOS ---
         self.PRIMARY = "#6366f1"
         self.PRIMARY_DARK = "#4f46e5"
@@ -999,7 +1002,48 @@ class RestauranteGUI:
         self.CARD_BG = "#1a1f35"
         self.CARD_HOVER = "#252b45"
         # --- FIN COLORES ESTÉTICOS ---
+        self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
+        self.vista_reservas = None # Añadir esta línea
 
+    # --- FUNCIÓN: verificar_stock_periodicamente ---
+    def verificar_stock_periodicamente(self):
+        """Verifica el inventario cada 30 segundos y actualiza la bandera."""
+        while True:
+            try:
+                items = self.inventory_service.obtener_inventario()
+                
+                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS
+                umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
+                ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
+
+                # ACTUALIZAR CONTENIDO DE ALERTA
+                if ingredientes_bajos:
+                    nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
+                    # Actualizar la bandera y la lista de ingredientes bajos
+                    self.hay_stock_bajo = True
+                    self.ingredientes_bajos_lista = [item['nombre'] for item in ingredientes_bajos]
+                    print(f"Bandera de stock bajo activada. Ingredientes: {self.ingredientes_bajos_lista}") # Mensaje de depuración
+                else:
+                    self.hay_stock_bajo = False
+                    self.ingredientes_bajos_lista = []
+                    # Si no hay stock bajo, ocultar el detalle
+                    self.mostrar_detalle_stock = False
+                    print("Bandera de stock bajo desactivada.") # Mensaje de depuración
+                
+                time.sleep(30) # VERIFICAR CADA 30 SEGUNDOS
+            except Exception as e:
+                print(f"Error en verificación periódica de inventario (stock): {e}")
+                time.sleep(30) # ESPERAR 30 SEGUNDOS ANTES DE REINTENTAR
+
+    # --- NUEVA FUNCIÓN: toggle_detalle_stock_bajo ---
+    # Alterna la visibilidad del detalle de ingredientes bajos.
+    def toggle_detalle_stock_bajo(self, e):
+        """Alterna la visibilidad del panel de detalles de stock bajo."""
+        self.mostrar_detalle_stock = not self.mostrar_detalle_stock
+        print(f"Detalle stock bajo mostrado: {self.mostrar_detalle_stock}") # Mensaje de depuración
+        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
+        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
+    # --- FIN NUEVA FUNCIÓN ---
 
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
@@ -1013,50 +1057,13 @@ class RestauranteGUI:
                     print(f"Error en sincronización: {e}")
                     time.sleep(3)
 
-        # --- NUEVA FUNCIÓN: verificar_stock_periodicamente ---
-        def verificar_stock_periodicamente():
-            """Verifica el inventario cada 30 segundos y actualiza la bandera."""
-            while True:
-                try:
-                    items = self.inventory_service.obtener_inventario()
-                    
-                    # VERIFICAR ALERTAS DE INGREDIENTES BAJOS
-                    umbral_bajo = 5  # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
-                    ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
-
-                    # Actualizar la bandera y la lista de ingredientes
-                    if ingredientes_bajos:
-                        self.hay_stock_bajo = True
-                        self.ingredientes_bajos_lista = [item['nombre'] for item in ingredientes_bajos]
-                        print(f"Bandera de stock bajo activada. Ingredientes: {self.ingredientes_bajos_lista}") # Mensaje de depuración
-                    else:
-                        self.hay_stock_bajo = False
-                        self.ingredientes_bajos_lista = []
-                        # Si no hay stock bajo, ocultar el detalle
-                        self.mostrar_detalle_stock = False
-                        print("Bandera de stock bajo desactivada.") # Mensaje de depuración
-                    
-                    time.sleep(30)  # VERIFICAR CADA 30 SEGUNDOS
-                except Exception as e:
-                    print(f"Error en verificación periódica de inventario (stock): {e}")
-                    time.sleep(30)  # ESPERAR 30 SEGUNDOS ANTES DE REINTENTAR
-
         # ✅ INICIAR HILO DE SINCRONIZACIÓN GENERAL
         self.hilo_sincronizacion = threading.Thread(target=actualizar_periodicamente, daemon=True)
         self.hilo_sincronizacion.start()
 
         # ✅ INICIAR HILO DE VERIFICACIÓN DE STOCK
-        self.hilo_verificacion_stock = threading.Thread(target=verificar_stock_periodicamente, daemon=True)
+        self.hilo_verificacion_stock = threading.Thread(target=self.verificar_stock_periodicamente, daemon=True)
         self.hilo_verificacion_stock.start()
-
-    # --- NUEVA FUNCIÓN: toggle_detalle_stock_bajo ---
-    # Alterna la visibilidad del detalle de ingredientes bajos.
-    def toggle_detalle_stock_bajo(self, e):
-        """Alterna la visibilidad del panel de detalles de stock bajo."""
-        self.mostrar_detalle_stock = not self.mostrar_detalle_stock
-        print(f"Detalle stock bajo mostrado: {self.mostrar_detalle_stock}") # Mensaje de depuración
-        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
-        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
 
     def main(self, page: ft.Page):
         self.page = page
@@ -1101,7 +1108,7 @@ class RestauranteGUI:
             bgcolor=self.CARD_BG,  # Usar color base de carta
             padding=10,
             border_radius=5,
-            visible=False, # Inicialmente oculto, se controla en actualizar_ui_completo
+            visible=False, # Inicialmente oculto, se controla en actualizar_visibilidad_alerta
             width=220, # Ancho del panel
             # No usar ink=True aquí, solo el botón principal debe ser clickeable
         )
@@ -1321,6 +1328,10 @@ class RestauranteGUI:
         # --- FIN AÑADIR ESTA LÍNEA ---
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
+        # --- ACTUALIZAR VISIBILIDAD DEL INDICADOR Y DETALLE ---
+        if hasattr(self, 'actualizar_visibilidad_alerta'):
+            self.actualizar_visibilidad_alerta()
+        # --- FIN ACTUALIZAR VISIBILIDAD ---
         self.page.update()
         if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
     # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
