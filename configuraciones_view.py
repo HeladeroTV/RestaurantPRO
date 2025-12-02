@@ -1,3 +1,4 @@
+# configuraciones_view.py
 import flet as ft
 from typing import List, Dict, Any
 
@@ -36,6 +37,9 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
     # Lista de configuraciones guardadas
     lista_configuraciones_guardadas = ft.Column(spacing=10)
 
+    # Lista temporal para almacenar ingredientes antes de crear la configuración
+    ingredientes_seleccionados = [] # Lista de diccionarios con detalles del ingrediente
+
     def aplicar_configuracion_click(config_id: int):
         try:
             configs = config_service.obtener_configuraciones()
@@ -48,7 +52,7 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
                 try:
                     # ✅ AGREGAR INGREDIENTE AL INVENTARIO
                     inventory_service.agregar_item_inventario(
-                        nombre=ing["nombre"],
+                        nombre=ing["nombre"], # El nombre ya debería estar capitalizado
                         cantidad=ing["cantidad"],
                         unidad=ing["unidad"]
                     )
@@ -75,12 +79,15 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
         if not nombre_ing or not cantidad:
             return
 
+        # Capitalizar el nombre del ingrediente
+        nombre_ing_capitalizado = nombre_ing.strip().capitalize()
+
         item_row = ft.Container(
             content=ft.Row([
-                ft.Text(f"{nombre_ing} - {cantidad} {unidad}"),
+                ft.Text(f"{nombre_ing_capitalizado} - {cantidad} {unidad}"), # Mostrar el nombre capitalizado
                 ft.IconButton(
                     icon=ft.Icons.DELETE,
-                    on_click=lambda e, nombre=nombre_ing: eliminar_ingrediente_click(nombre)
+                    on_click=lambda e, nombre=nombre_ing_capitalizado: eliminar_ingrediente_click(nombre) # Pasar el nombre capitalizado
                 )
             ]),
             bgcolor=ft.Colors.BLUE_GREY_800,
@@ -88,6 +95,19 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
             border_radius=5
         )
         lista_ingredientes.controls.append(item_row)
+
+        # Agregar a la lista temporal capitalizando el nombre
+        ingredientes_seleccionados.append({
+            "nombre": nombre_ing_capitalizado, # ✅ GUARDAR CON NOMBRE CAPITALIZADO
+            "cantidad": int(cantidad),
+            "unidad": unidad
+        })
+
+        # Limpiar campos de entrada de ingrediente
+        nombre_ingrediente_input.value = ""
+        cantidad_input.value = ""
+        unidad_dropdown.value = "unidad" # Reiniciar unidad si es necesario
+
         page.update()
 
     def eliminar_ingrediente_click(nombre_ing: str):
@@ -96,35 +116,48 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
             c for c in lista_ingredientes.controls
             if c.content.controls[0].value.split(" - ")[0] != nombre_ing
         ]
+        # Eliminar de la lista temporal
+        global ingredientes_seleccionados
+        ingredientes_seleccionados = [ing for ing in ingredientes_seleccionados if ing["nombre"] != nombre_ing]
+
         page.update()
 
     def crear_configuracion_click(e):
         nombre = nombre_input.value
         descripcion = descripcion_input.value
 
+        # ✅ VALIDACIÓN: Verificar si la lista de ingredientes está vacía
+        if not ingredientes_seleccionados:
+            print("No se puede crear la configuración sin ingredientes.")
+            # Opcional: Mostrar un mensaje en la interfaz
+            def cerrar_alerta(e):
+                page.close(dlg_error)
+            
+            dlg_error = ft.AlertDialog(
+                title=ft.Text("Error"),
+                content=ft.Text("No se puede crear la configuración sin ingredientes."),
+                actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta)],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            page.dialog = dlg_error
+            dlg_error.open = True
+            page.update()
+            return # Salir de la función si no hay ingredientes
+
         if not nombre:
             return
 
-        # Obtener ingredientes de la lista visual
-        ingredientes = []
-        for control in lista_ingredientes.controls:
-            texto = control.content.controls[0].value
-            nombre_ing, cantidad_unidad = texto.split(" - ")
-            cantidad, unidad = cantidad_unidad.split(" ", 1)
-            ingredientes.append({
-                "nombre": nombre_ing,  # ✅ AHORA SE USA EL NOMBRE DEL INGREDIENTE
-                "cantidad": int(cantidad),
-                "unidad": unidad
-            })
-
         try:
-            # ✅ MODIFICAR EL SERVICIO PARA ENVIAR NOMBRES DE INGREDIENTES
-            config_service.crear_configuracion(nombre, descripcion, ingredientes)
+            # ✅ MODIFICAR EL SERVICIO PARA ENVIAR NOMBRES CAPITALIZADOS
+            # La lista 'ingredientes_seleccionados' ya contiene los nombres capitalizados
+            config_service.crear_configuracion(nombre, descripcion, ingredientes_seleccionados)
             nombre_input.value = ""
             descripcion_input.value = ""
             nombre_ingrediente_input.value = ""
             cantidad_input.value = ""
-            lista_ingredientes.controls.clear()
+            unidad_dropdown.value = "unidad"
+            lista_ingredientes.controls.clear() # Limpiar la lista visual
+            ingredientes_seleccionados.clear() # Limpiar la lista temporal
             actualizar_lista_configuraciones_guardadas()  # ✅ ACTUALIZAR LISTA
             on_update_ui()
         except Exception as ex:
@@ -149,7 +182,7 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
                         ft.Text(f"Descripción: {config['descripcion']}", size=14),
                         ft.Text("Ingredientes:", size=14, weight=ft.FontWeight.BOLD),
                         ft.Column([
-                            ft.Text(f"- {ing['nombre']}: {ing['cantidad']} {ing['unidad']}")
+                            ft.Text(f"- {ing['nombre']}: {ing['cantidad']} {ing['unidad']}") # Mostrar nombre capitalizado
                             for ing in config['ingredientes']
                         ]),
                         ft.ElevatedButton(

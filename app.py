@@ -1067,7 +1067,7 @@ class RestauranteGUI:
 
     def main(self, page: ft.Page):
         self.page = page
-        page.title = "Sistema Restaurante Profesional"
+        page.title = "RestIA"
         page.padding = 0
         page.theme_mode = "dark"
         page.bgcolor = "#0a0e1a" # Aplicar color de fondo oscuro principal
