@@ -5,7 +5,7 @@ import threading
 import time
 import requests
 
-def crear_vista_inventario(inventory_service, on_update_ui, page):
+def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=None): # <-- AÑADIR app_instance
     # Campo para mostrar alerta de bajo umbral
     alerta_umbral = ft.Container(expand=False) # Contenedor para la alerta
 
@@ -36,8 +36,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
             try:
                 items = inventory_service.obtener_inventario()
                 
-                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS
-                umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
+                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL DE LA APP
+                # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
+                umbral_bajo = getattr(app_instance, 'umbral_stock_bajo', 5) if app_instance else 5 # <-- USAR EL UMBRAL DE LA APP
                 ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
 
                 # ACTUALIZAR CONTENIDO DE ALERTA
@@ -74,8 +75,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         try:
             items = inventory_service.obtener_inventario()
             
-            # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS ---
-            umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
+            # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL DE LA APP ---
+            # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
+            umbral_bajo = getattr(app_instance, 'umbral_stock_bajo', 5) if app_instance else 5 # <-- USAR EL UMBRAL DE LA APP
             ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
 
             # ACTUALIZAR CONTENIDO DE ALERTA

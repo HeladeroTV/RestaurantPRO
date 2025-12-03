@@ -11,7 +11,22 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
     # Selector de ingrediente y cantidad
     ingrediente_dropdown = ft.Dropdown(label="Ingrediente", width=250)
     cantidad_ingrediente_input = ft.TextField(label="Cantidad", width=100, input_filter=ft.NumbersOnlyInputFilter())
-    unidad_ingrediente_input = ft.TextField(label="Unidad", width=100, value="unidad")
+
+    # --- NUEVO: Dropdown para Unidad ---
+    # Define las opciones como en configuraciones_view.py
+    unidad_ingrediente_dropdown = ft.Dropdown(
+        label="Unidad",
+        options=[
+            ft.dropdown.Option("unidad"),
+            ft.dropdown.Option("kg"),
+            ft.dropdown.Option("g"),
+            ft.dropdown.Option("lt"),
+            ft.dropdown.Option("ml"),
+        ],
+        value="unidad", # Valor por defecto
+        width=150
+    )
+    # --- FIN NUEVO ---
 
     # Botón para agregar ingrediente a la lista local
     agregar_ingrediente_btn = ft.ElevatedButton(
@@ -21,7 +36,7 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
     )
 
     # Lista visual de ingredientes para la receta actual (en memoria)
-    lista_ingredientes_receta = ft.Column(spacing=5)
+    lista_ingredientes = ft.Column(spacing=5)
 
     # Botón para crear la receta
     crear_receta_btn = ft.ElevatedButton(
@@ -65,11 +80,14 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
             print(f"Error al actualizar datos de recetas: {e}")
 
     # --- FIN FUNCIÓN ---
+
     def agregar_ingrediente_a_lista():
         """Agrega el ingrediente seleccionado a la lista visual y a la lista temporal."""
         ing_id_str = ingrediente_dropdown.value
         cantidad_str = cantidad_ingrediente_input.value
-        unidad = unidad_ingrediente_input.value
+        # --- OBTENER UNIDAD DEL DROPDOWN ---
+        unidad = unidad_ingrediente_dropdown.value # Obtener valor del dropdown
+        # --- FIN OBTENER UNIDAD ---
 
         if not ing_id_str or not cantidad_str:
             print("Debe seleccionar un ingrediente y especificar una cantidad.")
@@ -89,7 +107,7 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
 
             item_row = ft.Container(
                 content=ft.Row([
-                    ft.Text(f"{nombre_ing} - Cantidad: {cantidad} {unidad}"),
+                    ft.Text(f"{nombre_ing} - Cantidad: {cantidad} {unidad}"), # Mostrar el nombre y la unidad seleccionada
                     ft.IconButton(
                         icon=ft.Icons.DELETE,
                         on_click=lambda e, id_ing=ing_id: eliminar_ingrediente_de_lista(id_ing)
@@ -99,19 +117,21 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
                 padding=5,
                 border_radius=5
             )
-            lista_ingredientes_receta.controls.append(item_row)
+            lista_ingredientes.controls.append(item_row)
 
             # Agregar a la lista temporal
             ingredientes_seleccionados.append({
                 "ingrediente_id": ing_id,
                 "cantidad_necesaria": cantidad,
-                "unidad_medida_necesaria": unidad
+                "unidad_medida_necesaria": unidad # ✅ USAR EL VALOR DEL DROPDOWN
             })
 
             # Limpiar campos de ingrediente
             ingrediente_dropdown.value = ""
             cantidad_ingrediente_input.value = ""
-            unidad_ingrediente_input.value = "unidad"
+            # --- LIMPIAR EL DROPDOWN DE UNIDAD ---
+            unidad_ingrediente_dropdown.value = "unidad" # Reiniciar a valor por defecto
+            # --- FIN LIMPIAR EL DROPDOWN DE UNIDAD ---
 
             page.update()
         except ValueError:
@@ -121,8 +141,8 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
     def eliminar_ingrediente_de_lista(ing_id: int):
         """Elimina un ingrediente de la lista visual y de la lista temporal."""
         # Eliminar de la lista visual
-        lista_ingredientes_receta.controls = [
-            c for c in lista_ingredientes_receta.controls
+        lista_ingredientes.controls = [
+            c for c in lista_ingredientes.controls
             if int(c.content.controls[0].value.split(" - ")[0].split(" ID ")[-1]) != ing_id # Asumiendo que se guarda el ID en el texto
         ]
         # Corrección: Buscar por ID en la lista temporal
@@ -152,11 +172,11 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
             # Limpiar campos y lista
             descripcion_input.value = ""
             instrucciones_input.value = ""
-            lista_ingredientes_receta.controls.clear()
+            lista_ingredientes.controls.clear()
             ingredientes_seleccionados.clear() # Limpiar la lista temporal
             # Actualizar vistas
             actualizar_lista_recetas_guardadas()
-            on_update_ui() # Actualiza otras vistas si es necesario
+            on_update_ui()
         except Exception as ex:
             print(f"Error al crear receta: {ex}")
 
@@ -223,11 +243,13 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
             ft.Row([
                 ingrediente_dropdown,
                 cantidad_ingrediente_input,
-                unidad_ingrediente_input,
+                # --- CAMBIAR A DROPDOWN ---
+                unidad_ingrediente_dropdown, # ✅ USAR EL DROPDOWN
+                # --- FIN CAMBIAR A DROPDOWN ---
                 agregar_ingrediente_btn
             ]),
             ft.Container(
-                content=lista_ingredientes_receta,
+                content=lista_ingredientes,
                 bgcolor=ft.Colors.BLUE_GREY_800,
                 padding=10,
                 border_radius=5
@@ -235,13 +257,11 @@ def crear_vista_recetas(recetas_service, menu_service, inventario_service, on_up
             crear_receta_btn,
             ft.Divider(),
             ft.Text("Recetas Guardadas", size=18, weight=ft.FontWeight.BOLD),
-            lista_recetas_guardadas  # Lista de recetas existentes
+            lista_recetas_guardadas  # ✅ LISTA DE CONFIGURACIONES
         ]),
         padding=20,
         expand=True
     )
 
-    # --- ASIGNAR LA FUNCIÓN DE ACTUALIZACIÓN ---
-    vista.actualizar_datos = actualizar_datos
-    # --- FIN ASIGNACIÓN ---
+    # vista.cargar_clientes_mesas = cargar_clientes_mesas # Si decides usarlo
     return vista
