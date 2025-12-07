@@ -9,15 +9,14 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
     # Campo para mostrar alerta de bajo umbral
     alerta_umbral = ft.Container(expand=False) # Contenedor para la alerta
 
-    # Campos de entrada
+    # Campos de entrada para agregar nuevo ítem
     nombre_input = ft.TextField(label="Nombre del producto", width=300)
     cantidad_input = ft.TextField(
         label="Cantidad disponible",
         width=300,
         input_filter=ft.NumbersOnlyInputFilter()
     )
-    # --- NUEVO: Dropdown para Unidad ---
-    # Define las opciones como en configuraciones_view.py
+    # --- NUEVO: Dropdown para Unidad (ya implementado anteriormente) ---
     unidad_dropdown = ft.Dropdown(
         label="Unidad",
         options=[
@@ -30,7 +29,14 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         value="unidad", # Valor por defecto
         width=150
     )
-    # --- FIN NUEVO ---
+    # --- NUEVO: Campo para Umbral Personalizado ---
+    umbral_input = ft.TextField(
+        label="Umbral de alerta",
+        width=150,
+        input_filter=ft.NumbersOnlyInputFilter(),
+        value="5" # Valor por defecto
+    )
+    # --- FIN NUEVOS CAMPOS ---
 
     # Lista de inventario
     lista_inventario = ft.ListView(
@@ -41,8 +47,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
     )
 
     # Variable para rastrear si hay un campo de cantidad en edición
-    # Ahora es parte de la 'vista' y se puede acceder desde fuera
     campo_en_edicion_id = None
+    # Variable para rastrear si hay un campo de umbral en edición (opcional, similar a cantidad)
+    campo_umbral_en_edicion_id = None
 
     # FUNCIÓN PARA VERIFICAR ALERTAS PERIÓDICAMENTE
     def verificar_alertas_periodicamente():
@@ -50,16 +57,19 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
             try:
                 items = inventory_service.obtener_inventario()
                 
-                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS
-                umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
-                ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
+                # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL PERSONALIZADO ---
+                # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
+                # ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo] # <-- COMENTAR ESTA LINEA
+                # Verificar usando el umbral personalizado de cada ítem
+                ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= item['cantidad_minima_alerta']]
+                # --- FIN VERIFICACIÓN ---
 
                 # ACTUALIZAR CONTENIDO DE ALERTA
                 if ingredientes_bajos:
                     nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
                     alerta_umbral.content = ft.Row([
                         ft.Icon(ft.Icons.WARNING, color=ft.Colors.WHITE),
-                        ft.Text(f"⚠️ Alerta de Inventario: {nombres_bajos} están por debajo del umbral ({umbral_bajo})", color=ft.Colors.WHITE)
+                        ft.Text(f"⚠️ Alerta de Inventario: {nombres_bajos} están por debajo del umbral personalizado", color=ft.Colors.WHITE)
                     ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
                     alerta_umbral.bgcolor = ft.Colors.RED_700
                     alerta_umbral.padding = 10
@@ -78,26 +88,29 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
     hilo_verificacion.start()
 
     def actualizar_lista():
-        nonlocal campo_en_edicion_id # Acceder a la variable del scope superior
-        # Si hay un campo en edición, NO actualizar la lista para no perder el foco/valor
-        if campo_en_edicion_id is not None:
-            print(f"No se actualiza la lista de inventario porque el campo {campo_en_edicion_id} está en edición.")
+        nonlocal campo_en_edicion_id, campo_umbral_en_edicion_id # Acceder a las variables del scope superior
+        # Si hay un campo en edición (cantidad o umbral), NO actualizar la lista para no perder el foco/valor
+        if campo_en_edicion_id is not None or campo_umbral_en_edicion_id is not None:
+            print(f"No se actualiza la lista de inventario porque un campo está en edición.")
             return # Salir sin hacer nada
 
         print("Actualizando lista de inventario...") # Mensaje de depuración
         try:
             items = inventory_service.obtener_inventario()
             
-            # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS ---
-            umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
-            ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
+            # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL PERSONALIZADO ---
+            # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
+            # ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo] # <-- COMENTAR ESTA LINEA
+            # Verificar usando el umbral personalizado de cada ítem
+            ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= item['cantidad_minima_alerta']]
+            # --- FIN VERIFICACIÓN ---
 
             # ACTUALIZAR CONTENIDO DE ALERTA
             if ingredientes_bajos:
                 nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
                 alerta_umbral.content = ft.Row([
                     ft.Icon(ft.Icons.WARNING, color=ft.Colors.WHITE),
-                    ft.Text(f"⚠️ Alerta de Inventario: {nombres_bajos} están por debajo del umbral ({umbral_bajo})", color=ft.Colors.WHITE)
+                    ft.Text(f"⚠️ Alerta de Inventario: {nombres_bajos} están por debajo del umbral personalizado", color=ft.Colors.WHITE)
                 ], vertical_alignment=ft.CrossAxisAlignment.CENTER)
                 alerta_umbral.bgcolor = ft.Colors.RED_700
                 alerta_umbral.padding = 10
@@ -121,32 +134,55 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
                     hint_text=f"Actual: {item['cantidad_disponible']}",
                     data=item_id # Almacenar ID para identificarlo
                 )
+                # --- NUEVO: Campo de texto para ingresar el nuevo umbral ---
+                nuevo_umbral_input = ft.TextField(
+                    label="Umbral Alerta",
+                    value=str(item['cantidad_minima_alerta']), # Valor inicial es el umbral actual
+                    width=120,
+                    input_filter=ft.NumbersOnlyInputFilter(), # Asumiendo que el umbral es numérico
+                    hint_text=f"Actual: {item['cantidad_minima_alerta']}",
+                    data=item_id # Almacenar ID para identificarlo
+                )
+                # --- FIN NUEVO ---
 
-                # Función para manejar el foco (inicio de edición)
+                # Función para manejar el foco (inicio de edición) - Cantidad
                 def on_focus_cantidad(e, item_id=item_id):
                     nonlocal campo_en_edicion_id
                     campo_en_edicion_id = item_id
-                    print(f"Campo {item_id} en edición.")
+                    print(f"Campo cantidad {item_id} en edición.")
 
-                # Función para manejar la pérdida de foco (fin de edición)
+                # Función para manejar la pérdida de foco (fin de edición) - Cantidad
                 def on_blur_cantidad(e, item_id=item_id):
                     nonlocal campo_en_edicion_id
                     if campo_en_edicion_id == item_id:
                         campo_en_edicion_id = None
-                        print(f"Campo {item_id} dejó de estar en edición.")
-                        # Opcional: Forzar actualización de la lista después de salir del campo
-                        # Esto puede ser útil si quieres que el valor del campo se actualice inmediatamente
-                        # al salir del campo, incluso si no se presiona "Actualizar".
-                        # on_update_ui() # Descomentar si se desea este comportamiento
+                        print(f"Campo cantidad {item_id} dejó de estar en edición.")
+
+                # Función para manejar el foco (inicio de edición) - Umbral
+                def on_focus_umbral(e, item_id=item_id):
+                    nonlocal campo_umbral_en_edicion_id
+                    campo_umbral_en_edicion_id = item_id
+                    print(f"Campo umbral {item_id} en edición.")
+
+                # Función para manejar la pérdida de foco (fin de edición) - Umbral
+                def on_blur_umbral(e, item_id=item_id):
+                    nonlocal campo_umbral_en_edicion_id
+                    if campo_umbral_en_edicion_id == item_id:
+                        campo_umbral_en_edicion_id = None
+                        print(f"Campo umbral {item_id} dejó de estar en edición.")
 
                 # Asignar las funciones de foco
                 nuevo_cantidad_input.on_focus = lambda e, id=item_id: on_focus_cantidad(e, id)
                 nuevo_cantidad_input.on_blur = lambda e, id=item_id: on_blur_cantidad(e, id)
+                # --- AÑADIR FUNCIONES DE FOCO PARA EL UMBRAL ---
+                nuevo_umbral_input.on_focus = lambda e, id=item_id: on_focus_umbral(e, id)
+                nuevo_umbral_input.on_blur = lambda e, id=item_id: on_blur_umbral(e, id)
+                # --- FIN AÑADIR FUNCIONES DE FOCO ---
 
-                # Botón Actualizar
+                # Botón Actualizar (ahora actualiza cantidad Y umbral)
                 boton_actualizar = ft.ElevatedButton(
                     text="Actualizar",
-                    on_click=lambda e, id=item_id, input_cantidad=nuevo_cantidad_input, unidad_original=item['unidad_medida']: actualizar_ingrediente(id, input_cantidad, unidad_original),
+                    on_click=lambda e, id=item_id, input_cantidad=nuevo_cantidad_input, input_umbral=nuevo_umbral_input, unidad_original=item['unidad_medida']: actualizar_ingrediente_y_umbral(id, input_cantidad, input_umbral, unidad_original),
                     style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE)
                 )
 
@@ -163,10 +199,12 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
                     content=ft.Column([
                         ft.Text(f"{item['nombre']}", size=18, weight=ft.FontWeight.BOLD),
                         ft.Text(f"Cantidad: {item['cantidad_disponible']} {item['unidad_medida']}", size=14),
+                        ft.Text(f"Umbral Alerta: {item['cantidad_minima_alerta']}", size=14), # Mostrar umbral actual
                         ft.Text(f"Registrado: {item['fecha_registro']}", size=12, color=ft.Colors.GREY_500),
                         ft.Row([
                             nuevo_cantidad_input, # Campo de texto para nueva cantidad
-                            boton_actualizar,      # Botón Actualizar
+                            nuevo_umbral_input,   # Campo de texto para nuevo umbral
+                            boton_actualizar,      # Botón Actualizar (cantidad y umbral)
                             boton_eliminar         # Botón Eliminar
                         ])
                     ]),
@@ -181,14 +219,14 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
             alerta_umbral.visible = False # Asegurar que no se muestre alerta si hay error al cargar
             page.update()
 
-    # --- FUNCIÓN: actualizar_ingrediente ---
-    # Actualiza la cantidad de un ingrediente específico.
-    def actualizar_ingrediente(item_id: int, input_cantidad: ft.TextField, unidad_original: str):
-        """Actualiza la cantidad de un ingrediente."""
-        # Asegurarse de que el campo no esté en edición antes de tomar su valor
+    # --- FUNCIÓN: actualizar_ingrediente_y_umbral ---
+    # Actualiza la cantidad Y el umbral de un ingrediente específico.
+    def actualizar_ingrediente_y_umbral(item_id: int, input_cantidad: ft.TextField, input_umbral: ft.TextField, unidad_original: str):
+        """Actualiza la cantidad y el umbral de un ingrediente."""
+        # Asegurarse de que los campos no estén en edición antes de tomar su valor
         # (esto puede no ser necesario si se maneja bien el foco)
-        nonlocal campo_en_edicion_id
-        if campo_en_edicion_id == item_id:
+        nonlocal campo_en_edicion_id, campo_umbral_en_edicion_id
+        if campo_en_edicion_id == item_id or campo_umbral_en_edicion_id == item_id:
              # Opcional: Forzar la pérdida de foco antes de leer el valor
              # input_cantidad.blur() # Flet no tiene un blur() directo en el control aquí
              # Es mejor dejar que el usuario mueva el foco manualmente o use on_change
@@ -200,48 +238,61 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
 
         try:
             nueva_cantidad_str = input_cantidad.value.strip()
-            if not nueva_cantidad_str:
-                print("Ingrese una cantidad válida.")
+            nuevo_umbral_str = input_umbral.value.strip() # Obtener valor del campo de umbral
+            if not nueva_cantidad_str or not nuevo_umbral_str: # Verificar que ambos campos tengan valor
+                print("Ingrese valores válidos para cantidad y umbral.")
                 return
             nueva_cantidad = int(nueva_cantidad_str)
+            nuevo_umbral = float(nuevo_umbral_str) # Convertir umbral a float
             if nueva_cantidad < 0: # Permitir cero para "agotado"
                 print("La cantidad no puede ser negativa.")
                 return
+            if nuevo_umbral < 0: # Opcional: Permitir umbral cero o negativo
+                print("El umbral no puede ser negativo.") # O permitirlo según lógica de negocio
+                return # Quitar esta línea si se permite umbral <= 0
 
-            # Actualizar el ítem en el backend
-            inventory_service.actualizar_item_inventario(item_id, nueva_cantidad, unidad=unidad_original)
+            # Actualizar el ítem en el backend (cantidad, unidad y umbral)
+            inventory_service.actualizar_item_inventario(item_id, nueva_cantidad, unidad=unidad_original, cantidad_minima_alerta=nuevo_umbral)
 
-            # Limpiar el indicador de edición si es necesario
+            # Limpiar los indicadores de edición si es necesario
             if campo_en_edicion_id == item_id:
                 campo_en_edicion_id = None
+            if campo_umbral_en_edicion_id == item_id:
+                campo_umbral_en_edicion_id = None
 
             # Actualizar la UI general
-            on_update_ui() # Esto llamará a actualizar_lista, que ahora puede verificar campo_en_edicion_id
+            on_update_ui() # Esto llamará a actualizar_lista
         except ValueError:
-            print("Cantidad debe ser un número entero válido.")
+            print("Cantidad y umbral deben ser números válidos.")
         except Exception as ex:
             print(f"Error al actualizar ítem: {ex}")
 
     def agregar_item_click(e):
         nombre = nombre_input.value
         cantidad = cantidad_input.value
-        # --- OBTENER UNIDAD DEL DROPDOWN ---
-        unidad = unidad_dropdown.value # Obtener valor del dropdown
-        # --- FIN OBTENER UNIDAD DEL DROPDOWN ---
-
-        if not nombre or not cantidad:
+        unidad = unidad_dropdown.value
+        # --- OBTENER UMBRAL DEL CAMPO ---
+        umbral_str = umbral_input.value
+        # --- FIN OBTENER UMBRAL ---
+        if not nombre or not cantidad or not umbral_str: # Verificar que todos los campos tengan valor
             return
 
         try:
             # Transformar el nombre: primera letra mayúscula, resto minúsculas
             nombre_formateado = nombre.strip().capitalize()
-            inventory_service.agregar_item_inventario(nombre_formateado, int(cantidad), unidad)
+            cantidad_int = int(cantidad)
+            umbral_float = float(umbral_str) # Convertir umbral a float
+            # Pasar el umbral personalizado al servicio
+            inventory_service.agregar_item_inventario(nombre_formateado, cantidad_int, unidad, cantidad_minima_alerta=umbral_float)
             nombre_input.value = ""
             cantidad_input.value = ""
-            # --- REINICIAR EL DROPDOWN A SU VALOR POR DEFECTO ---
-            unidad_dropdown.value = "unidad" # Reiniciar a valor por defecto
-            # --- FIN REINICIAR EL DROPDOWN ---
+            unidad_dropdown.value = "unidad" # Reiniciar unidad si es necesario
+            # --- REINICIAR EL UMBRAL ---
+            umbral_input.value = "5" # Reiniciar al valor por defecto
+            # --- FIN REINICIAR EL UMBRAL ---
             on_update_ui() # Actualiza toda la UI, incluyendo inventario
+        except ValueError:
+            print("Cantidad y umbral deben ser números válidos.")
         except Exception as ex:
             print(f"Error al agregar ítem: {ex}")
 
@@ -305,9 +356,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
             ft.Text("Agregar nuevo ítem", size=18, weight=ft.FontWeight.BOLD),
             nombre_input,
             cantidad_input,
-            # --- AÑADIR DROPDOWN DE UNIDAD ---
-            unidad_dropdown, # ✅ USAR EL DROPDOWN
-            # --- FIN AÑADIR DROPDOWN DE UNIDAD ---
+            # --- AÑADIR DROPDOWN DE UNIDAD Y CAMPO DE UMBRAL ---
+            ft.Row([unidad_dropdown, umbral_input]), # Agrupar unidad y umbral
+            # --- FIN AÑADIR ---
             ft.ElevatedButton(
                 "Agregar ítem",
                 on_click=agregar_item_click,
@@ -321,5 +372,6 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
         expand=True
     )
     vista.campo_en_edicion_id = campo_en_edicion_id
+    vista.campo_umbral_en_edicion_id = campo_umbral_en_edicion_id # Opcional: si necesitas acceder desde fuera
     vista.actualizar_lista = actualizar_lista
     return vista
