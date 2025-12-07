@@ -5,7 +5,7 @@ import threading
 import time
 import requests
 
-def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=None): # <-- AÑADIR app_instance
+def crear_vista_inventario(inventory_service, on_update_ui, page):
     # Campo para mostrar alerta de bajo umbral
     alerta_umbral = ft.Container(expand=False) # Contenedor para la alerta
 
@@ -16,7 +16,21 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
         width=300,
         input_filter=ft.NumbersOnlyInputFilter()
     )
-    unidad_input = ft.TextField(label="Unidad (ej: kg, unidad, litro)", value="unidad", width=300)
+    # --- NUEVO: Dropdown para Unidad ---
+    # Define las opciones como en configuraciones_view.py
+    unidad_dropdown = ft.Dropdown(
+        label="Unidad",
+        options=[
+            ft.dropdown.Option("unidad"),
+            ft.dropdown.Option("kg"),
+            ft.dropdown.Option("g"),
+            ft.dropdown.Option("lt"),
+            ft.dropdown.Option("ml"),
+        ],
+        value="unidad", # Valor por defecto
+        width=150
+    )
+    # --- FIN NUEVO ---
 
     # Lista de inventario
     lista_inventario = ft.ListView(
@@ -36,9 +50,8 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
             try:
                 items = inventory_service.obtener_inventario()
                 
-                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL DE LA APP
-                # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
-                umbral_bajo = getattr(app_instance, 'umbral_stock_bajo', 5) if app_instance else 5 # <-- USAR EL UMBRAL DE LA APP
+                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS
+                umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
                 ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
 
                 # ACTUALIZAR CONTENIDO DE ALERTA
@@ -75,9 +88,8 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
         try:
             items = inventory_service.obtener_inventario()
             
-            # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL DE LA APP ---
-            # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
-            umbral_bajo = getattr(app_instance, 'umbral_stock_bajo', 5) if app_instance else 5 # <-- USAR EL UMBRAL DE LA APP
+            # --- VERIFICAR ALERTAS DE INGREDIENTES BAJOS ---
+            umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR)
             ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= umbral_bajo]
 
             # ACTUALIZAR CONTENIDO DE ALERTA
@@ -205,7 +217,6 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
 
             # Actualizar la UI general
             on_update_ui() # Esto llamará a actualizar_lista, que ahora puede verificar campo_en_edicion_id
-
         except ValueError:
             print("Cantidad debe ser un número entero válido.")
         except Exception as ex:
@@ -214,7 +225,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
     def agregar_item_click(e):
         nombre = nombre_input.value
         cantidad = cantidad_input.value
-        unidad = unidad_input.value
+        # --- OBTENER UNIDAD DEL DROPDOWN ---
+        unidad = unidad_dropdown.value # Obtener valor del dropdown
+        # --- FIN OBTENER UNIDAD DEL DROPDOWN ---
 
         if not nombre or not cantidad:
             return
@@ -225,7 +238,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
             inventory_service.agregar_item_inventario(nombre_formateado, int(cantidad), unidad)
             nombre_input.value = ""
             cantidad_input.value = ""
-            unidad_input.value = "unidad"
+            # --- REINICIAR EL DROPDOWN A SU VALOR POR DEFECTO ---
+            unidad_dropdown.value = "unidad" # Reiniciar a valor por defecto
+            # --- FIN REINICIAR EL DROPDOWN ---
             on_update_ui() # Actualiza toda la UI, incluyendo inventario
         except Exception as ex:
             print(f"Error al agregar ítem: {ex}")
@@ -290,7 +305,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
             ft.Text("Agregar nuevo ítem", size=18, weight=ft.FontWeight.BOLD),
             nombre_input,
             cantidad_input,
-            unidad_input,
+            # --- AÑADIR DROPDOWN DE UNIDAD ---
+            unidad_dropdown, # ✅ USAR EL DROPDOWN
+            # --- FIN AÑADIR DROPDOWN DE UNIDAD ---
             ft.ElevatedButton(
                 "Agregar ítem",
                 on_click=agregar_item_click,
@@ -303,8 +320,6 @@ def crear_vista_inventario(inventory_service, on_update_ui, page, app_instance=N
         padding=20,
         expand=True
     )
-
-    # Asignar la variable de estado y la función de actualización a la vista
     vista.campo_en_edicion_id = campo_en_edicion_id
     vista.actualizar_lista = actualizar_lista
     return vista

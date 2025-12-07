@@ -669,7 +669,14 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             except Exception as ex:
                 print(f"Error al eliminar pedido: {ex}")
         origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
-        nota = f"Notas: {pedido.get('notas', 'Ninguna')}"
+        # --- MODIFICACIÓN PARA MOSTRAR "SIN NOTAS" ---
+        # Verificar si 'notas' existe y no está vacío
+        notas_pedido = pedido.get('notas', '')
+        if not notas_pedido: # Si es None, '', o cualquier valor "falsy"
+            nota = "Sin Nota"
+        else:
+            nota = f"Notas: {notas_pedido}"
+        # --- FIN MODIFICACIÓN ---
         return ft.Container(
             content=ft.Column([
                 ft.Row([
@@ -682,7 +689,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
                     )
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(nota, color=ft.Colors.YELLOW_200),
+                ft.Text(nota, color=ft.Colors.YELLOW_200), # <-- Se usa la variable 'nota' modificada
                 ft.Row([
                     ft.ElevatedButton(
                         "En preparacion",
@@ -1369,7 +1376,7 @@ class RestauranteGUI:
         )
         # --- FIN AÑADIR ESTA LINEA ---
         # self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page) # <-- COMENTAR ESTA LINEA
-        self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page, self) # <-- PASAR LA INSTANCIA self
+        self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page) # <-- QUITAR 'self'
         self.vista_configuraciones = crear_vista_configuraciones(
             self.config_service,
             self.inventory_service,
