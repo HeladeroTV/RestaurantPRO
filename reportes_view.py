@@ -19,7 +19,7 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
 
     # DatePicker para seleccionar la fecha
     fecha_picker = ft.DatePicker(
-        on_change=lambda e: actualizar_reporte(None)
+        on_change=lambda e: setattr(fecha_text, 'value', f"Fecha: {e.control.value.strftime('%Y-%m-%d')}") or page.update()
     )
     fecha_button = ft.ElevatedButton(
         "Seleccionar fecha",
@@ -55,6 +55,10 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 fecha = datetime.now()
             else:
                 fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
+
+            # --- OBTENER VENTAS POR HORA ---
+            ventas_por_hora = backend_service.obtener_ventas_por_hora(fecha.strftime("%Y-%m-%d"))
+            # --- FIN OBTENER VENTAS POR HORA ---
 
             # Obtener datos del backend para el reporte general
             datos = backend_service.obtener_reporte(tipo, fecha)
@@ -93,6 +97,26 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                     contenedor_reporte.content.controls.append(
                         ft.Text(f"- {producto['nombre']}: {producto['cantidad']} unidades")
                     )
+
+            # --- MOSTRAR VENTAS POR HORA ---
+            contenedor_reporte.content.controls.append(
+                ft.Divider()
+            )
+            contenedor_reporte.content.controls.append(
+                ft.Text("Ventas por Hora:", size=18, weight=ft.FontWeight.BOLD)
+            )
+            # Filtrar horas con ventas para mostrar solo esas
+            horas_con_venta = {h: v for h, v in ventas_por_hora.items() if v > 0}
+            if horas_con_venta:
+                for hora_str, total in sorted(horas_con_venta.items()):
+                    contenedor_reporte.content.controls.append(
+                        ft.Text(f"Hora {hora_str.zfill(2)}:00 - ${total:.2f}")
+                    )
+            else:
+                contenedor_reporte.content.controls.append(
+                    ft.Text("No hubo ventas en esta fecha.", size=14, italic=True)
+                )
+            # --- FIN MOSTRAR VENTAS POR HORA ---
 
             # --- ACTUALIZAR ANÁLISIS DE PRODUCTOS ---
             # Calcular rango de fechas para el análisis (similar al reporte general)
@@ -164,12 +188,17 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                     ft.Text(f"Error al cargar análisis de productos: {ex}", color=ft.Colors.RED)
                 )
 
+            # --- FIN ACTUALIZAR ANÁLISIS DE PRODUCTOS ---
+
             page.update()
         except Exception as ex:
             print(f"Error al actualizar reporte general: {ex}")
-
-    # Configurar DatePicker
-    fecha_picker.on_change = lambda e: setattr(fecha_text, 'value', f"Fecha: {e.control.value.strftime('%Y-%m-%d')}") or page.update()
+            # Opcional: Mostrar error en la UI
+            contenedor_reporte.content.controls.clear()
+            contenedor_reporte.content.controls.append(
+                ft.Text(f"Error al cargar reporte: {ex}", color=ft.Colors.RED)
+            )
+            page.update()
 
     # Vista principal: Envolver la Columna en un Scrollview
     vista = ft.Container(
@@ -187,7 +216,7 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
             ),
             ft.Divider(),
-            contenedor_reporte, # Contenedor del reporte general
+            contenedor_reporte, # Contenedor del reporte general (ahora incluye ventas por hora)
             ft.Divider(),
             contenedor_analisis # Contenedor del análisis de productos
         ], scroll="auto"), # <-- AÑADIR scroll="auto" A LA COLUMNA

@@ -924,3 +924,62 @@ def eliminar_reserva(reserva_id: int, conn = Depends(get_db)):
         print(f"Error en eliminar_reserva: {e}")
         conn.rollback() # Revertir la transacción en caso de error
         raise HTTPException(status_code=500, detail="Error interno del servidor al eliminar la reserva.")
+    
+# --- NUEVO ENDPOINT CORREGIDO: Ventas por Hora ---
+@app.get("/reportes/ventas_por_hora")
+def obtener_ventas_por_hora(
+    fecha: str = Query(..., description="Fecha en formato YYYY-MM-DD para filtrar ventas por hora"),
+    conn: psycopg2.extensions.connection = Depends(get_db)
+):
+    """
+    Obtiene el total de ventas por hora para una fecha específica.
+    Args:
+        fecha (str): Fecha en formato 'YYYY-MM-DD'.
+        conn: Conexión a la base de datos.
+    Returns:
+        Dict[str, float]: Diccionario con hora (00-23) como clave y total de ventas como valor.
+    """
+    try:
+        # Asegurar que la fecha tiene el formato correcto
+        datetime.strptime(fecha, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato de fecha inválido. Use YYYY-MM-DD.")
+
+    try:
+        with conn.cursor() as cursor:
+            # Consultar pedidos completados (Pagado o Entregado) para la fecha dada
+            # Extraer la hora de la fecha_hora y sumar el total de cada pedido
+            # Seleccionar el nombre y el precio de cada ítem en el array JSONB 'items'
+            cursor.execute("""
+                SELECT EXTRACT(HOUR FROM fecha_hora) AS hora, SUM(item_data.precio) AS total_venta
+                FROM pedidos,
+                     jsonb_to_recordset(pedidos.items) AS item_data(nombre TEXT, precio REAL, tipo TEXT, cantidad INTEGER)
+                WHERE DATE(fecha_hora) = %s
+                AND estado IN ('Entregado', 'Pagado') -- Ajustar según tu definición de venta completada
+                GROUP BY EXTRACT(HOUR FROM fecha_hora)
+                ORDER BY hora;
+            """, (fecha,))
+            
+            resultados_db = cursor.fetchall()
+
+        # Inicializar un diccionario con todas las horas del día a 0.0
+        ventas_por_hora = {f"{h:02d}": 0.0 for h in range(24)} # Usar f-string para asegurar formato '00', '01', ..., '23'
+
+        # Llenar el diccionario con los resultados de la base de datos
+        for row in resultados_db:
+            # Asegurar que hora es un entero y total_venta es un número
+            hora_int = int(row['hora'])
+            total_venta_db = row['total_venta']
+            # Si total_venta_db es None (por ejemplo, si no hay items), usar 0.0
+            total_venta = float(total_venta_db) if total_venta_db is not None else 0.0
+            hora_str = f"{hora_int:02d}" # Convertir a string con formato '00', '01', ..., '23'
+            ventas_por_hora[hora_str] = total_venta
+
+        return ventas_por_hora
+    except Exception as e:
+        # Capturar cualquier error interno del servidor y loguearlo
+        print(f"Error interno en obtener_ventas_por_hora: {e}")
+        import traceback
+        traceback.print_exc() # Imprime el traceback completo
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor al calcular ventas por hora: {str(e)}")
+# --- FIN NUEVO ENDPOINT CORREGIDO ---

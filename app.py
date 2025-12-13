@@ -1510,8 +1510,8 @@ class RestauranteGUI:
                     # --- FIN AÑADIR INDICADORES ---
                     ft.Container(
                         content=reloj,
-                        left=20,
-                        bottom=50,
+                        right=20,   # <-- AÑADIR ESTA LÍNEA: 20px desde la derecha
+                        bottom=50,  # <-- MANTENER ESTA LÍNEA: 50px desde la parte inferior
                         padding=10,
                         bgcolor=ft.Colors.BLUE_GREY_900,
                         border_radius=8,

@@ -204,3 +204,18 @@ class BackendService:
         r = requests.get(f"{self.base_url}/analisis/productos/", params=params)
         r.raise_for_status()
         return r.json()
+    
+    # --- NUEVO MÉTODO: obtener_ventas_por_hora ---
+    def obtener_ventas_por_hora(self, fecha: str) -> Dict[str, float]:
+        """
+        Obtiene el total de ventas por hora para una fecha específica.
+        Args:
+            fecha (str): Fecha en formato 'YYYY-MM-DD'.
+        Returns:
+            Dict[str, float]: Diccionario con hora (00-23) como clave y total de ventas como valor.
+        """
+        params = {"fecha": fecha}
+        r = requests.get(f"{self.base_url}/reportes/ventas_por_hora", params=params)
+        r.raise_for_status()
+        return r.json()
+    # --- FIN NUEVO MÉTODO ---
