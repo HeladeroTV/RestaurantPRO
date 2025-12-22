@@ -17,6 +17,15 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
         input_filter=ft.NumbersOnlyInputFilter()
     )
 
+    # --- NUEVO: Campo para umbral de ingrediente ---
+    umbral_input = ft.TextField(
+        label="Umbral Alerta",
+        width=200,
+        input_filter=ft.NumbersOnlyInputFilter(), # Asumiendo que el umbral es numérico
+        value="5" # Valor por defecto
+    )
+    # --- FIN NUEVO ---
+
     # Dropdown para unidad
     unidad_dropdown = ft.Dropdown(
         label="Unidad",
@@ -51,10 +60,14 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
             for ing in config["ingredientes"]:
                 try:
                     # ✅ AGREGAR INGREDIENTE AL INVENTARIO
+                    # Ahora pasamos el umbral personalizado del ingrediente de la configuración
                     inventory_service.agregar_item_inventario(
                         nombre=ing["nombre"], # El nombre ya debería estar capitalizado
                         cantidad=ing["cantidad"],
-                        unidad=ing["unidad"]
+                        unidad=ing["unidad"],
+                        # --- PASAR EL UMBRAL DEL INGREDIENTE DE LA CONFIGURACIÓN ---
+                        cantidad_minima_alerta=ing.get("umbral_alerta", 5.0) # Usar get para evitar KeyError si no existe
+                        # --- FIN PASAR EL UMBRAL ---
                     )
                 except Exception as e:
                     print(f"Error al agregar ingrediente {ing['nombre']}: {e}")
@@ -75,46 +88,64 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
         nombre_ing = nombre_ingrediente_input.value
         cantidad = cantidad_input.value
         unidad = unidad_dropdown.value
+        # --- OBTENER EL UMBRAL DEL INPUT ---
+        umbral_str = umbral_input.value
+        # --- FIN OBTENER EL UMBRAL ---
 
-        if not nombre_ing or not cantidad:
+        if not nombre_ing or not cantidad or not umbral_str: # Verificar que todos los campos tengan valor
             return
 
-        # Capitalizar el nombre del ingrediente
-        nombre_ing_capitalizado = nombre_ing.strip().capitalize()
+        try:
+            # Convertir valores
+            cantidad_int = int(cantidad)
+            umbral_float = float(umbral_str) # Convertir umbral a float
 
-        item_row = ft.Container(
-            content=ft.Row([
-                ft.Text(f"{nombre_ing_capitalizado} - {cantidad} {unidad}"), # Mostrar el nombre capitalizado
-                ft.IconButton(
-                    icon=ft.Icons.DELETE,
-                    on_click=lambda e, nombre=nombre_ing_capitalizado: eliminar_ingrediente_click(nombre) # Pasar el nombre capitalizado
-                )
-            ]),
-            bgcolor=ft.Colors.BLUE_GREY_800,
-            padding=5,
-            border_radius=5
-        )
-        lista_ingredientes.controls.append(item_row)
+            # Capitalizar el nombre del ingrediente
+            nombre_ing_capitalizado = nombre_ing.strip().capitalize()
 
-        # Agregar a la lista temporal capitalizando el nombre
-        ingredientes_seleccionados.append({
-            "nombre": nombre_ing_capitalizado, # ✅ GUARDAR CON NOMBRE CAPITALIZADO
-            "cantidad": int(cantidad),
-            "unidad": unidad
-        })
+            item_row = ft.Container(
+                content=ft.Row([
+                    ft.Text(f"{nombre_ing_capitalizado} - {cantidad_int} {unidad} (Umbral: {umbral_float})"), # Mostrar el nombre capitalizado, cantidad, unidad y umbral
+                    ft.IconButton(
+                        icon=ft.Icons.DELETE,
+                        on_click=lambda e, nombre=nombre_ing_capitalizado: eliminar_ingrediente_click(nombre) # Pasar el nombre capitalizado
+                    )
+                ]),
+                bgcolor=ft.Colors.BLUE_GREY_800,
+                padding=5,
+                border_radius=5
+            )
+            lista_ingredientes.controls.append(item_row)
 
-        # Limpiar campos de entrada de ingrediente
-        nombre_ingrediente_input.value = ""
-        cantidad_input.value = ""
-        unidad_dropdown.value = "unidad" # Reiniciar unidad si es necesario
+            # Agregar a la lista temporal incluyendo el umbral
+            ingredientes_seleccionados.append({
+                "nombre": nombre_ing_capitalizado, # ✅ GUARDAR CON NOMBRE CAPITALIZADO
+                "cantidad": cantidad_int,
+                "unidad": unidad,
+                # --- AÑADIR EL UMBRAL ---
+                "umbral_alerta": umbral_float # Añadir el umbral a la lista temporal
+                # --- FIN AÑADIR EL UMBRAL ---
+            })
 
-        page.update()
+            # Limpiar campos de entrada de ingrediente
+            nombre_ingrediente_input.value = ""
+            cantidad_input.value = ""
+            # --- LIMPIAR EL INPUT DEL UMBRAL ---
+            umbral_input.value = "5" # Reiniciar al valor por defecto
+            # --- FIN LIMPIAR EL INPUT DEL UMBRAL ---
+            unidad_dropdown.value = "unidad" # Reiniciar unidad si es necesario
+
+            page.update()
+
+        except ValueError:
+            print("Cantidad y umbral deben ser números válidos.")
+            pass # Opcional: Mostrar un mensaje de error al usuario
 
     def eliminar_ingrediente_click(nombre_ing: str):
         # Eliminar de la lista visual
         lista_ingredientes.controls = [
             c for c in lista_ingredientes.controls
-            if c.content.controls[0].value.split(" - ")[0] != nombre_ing
+            if not c.content.controls[0].value.startswith(f"{nombre_ing} -") # Ajustar la comparación
         ]
         # Eliminar de la lista temporal
         global ingredientes_seleccionados
@@ -132,7 +163,7 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
             # Opcional: Mostrar un mensaje en la interfaz
             def cerrar_alerta(e):
                 page.close(dlg_error)
-            
+
             dlg_error = ft.AlertDialog(
                 title=ft.Text("Error"),
                 content=ft.Text("No se puede crear la configuración sin ingredientes."),
@@ -148,13 +179,16 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
             return
 
         try:
-            # ✅ MODIFICAR EL SERVICIO PARA ENVIAR NOMBRES CAPITALIZADOS
-            # La lista 'ingredientes_seleccionados' ya contiene los nombres capitalizados
+            # ✅ MODIFICAR EL SERVICIO PARA ENVIAR NOMBRES CAPITALIZADOS Y UMBRALES
+            # La lista 'ingredientes_seleccionados' ya contiene los nombres capitalizados y los umbrales
             config_service.crear_configuracion(nombre, descripcion, ingredientes_seleccionados)
             nombre_input.value = ""
             descripcion_input.value = ""
             nombre_ingrediente_input.value = ""
             cantidad_input.value = ""
+            # --- REINICIAR EL INPUT DEL UMBRAL ---
+            umbral_input.value = "5" # Reiniciar al valor por defecto
+            # --- FIN REINICIAR EL INPUT DEL UMBRAL ---
             unidad_dropdown.value = "unidad"
             lista_ingredientes.controls.clear() # Limpiar la lista visual
             ingredientes_seleccionados.clear() # Limpiar la lista temporal
@@ -182,7 +216,10 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
                         ft.Text(f"Descripción: {config['descripcion']}", size=14),
                         ft.Text("Ingredientes:", size=14, weight=ft.FontWeight.BOLD),
                         ft.Column([
-                            ft.Text(f"- {ing['nombre']}: {ing['cantidad']} {ing['unidad']}") # Mostrar nombre capitalizado
+                            # ft.Text(f"- {ing['nombre']}: {ing['cantidad']} {ing['unidad']}") # Mostrar nombre capitalizado
+                            # --- MOSTRAR TAMBIÉN EL UMBRAL ---
+                            ft.Text(f"- {ing['nombre']}: {ing['cantidad']} {ing['unidad']} (Umbral: {ing.get('umbral_alerta', 5.0)})") # Mostrar nombre, cantidad, unidad y umbral
+                            # --- FIN MOSTRAR UMBRAL ---
                             for ing in config['ingredientes']
                         ]),
                         ft.ElevatedButton(
@@ -215,6 +252,9 @@ def crear_vista_configuraciones(config_service, inventory_service, on_update_ui,
             ft.Row([
                 nombre_ingrediente_input,
                 cantidad_input,
+                # --- AÑADIR EL INPUT DEL UMBRAL ---
+                umbral_input, # Añadir el campo de umbral
+                # --- FIN AÑADIR EL INPUT DEL UMBRAL ---
                 unidad_dropdown,
                 ft.ElevatedButton(
                     "Agregar ingrediente",

@@ -906,7 +906,7 @@ def crear_vista_personalizacion(app_instance):
     Returns:
         ft.Container: Contenedor con la interfaz de personalización.
     """
-    # Campos para ingresar los nuevos umbrales
+    # Campo para ingresar el nuevo umbral de tiempo
     tiempo_umbral_input = ft.TextField(
         label="Tiempo umbral para pedidos (minutos)",
         value=str(app_instance.tiempo_umbral_minutos), # Mostrar valor actual
@@ -914,29 +914,21 @@ def crear_vista_personalizacion(app_instance):
         input_filter=ft.NumbersOnlyInputFilter(), # Solo números
         hint_text="Ej: 20"
     )
-    stock_umbral_input = ft.TextField(
-        label="Cantidad umbral para stock bajo",
-        value=str(app_instance.umbral_stock_bajo), # Mostrar valor actual
-        width=300,
-        input_filter=ft.NumbersOnlyInputFilter(), # Solo números
-        hint_text="Ej: 5"
-    )
 
     def guardar_configuracion_click(e):
-        """Guarda los nuevos umbrales ingresados."""
+        """Guarda el nuevo umbral de tiempo ingresado."""
         try:
             nuevo_tiempo_umbral = int(tiempo_umbral_input.value)
-            nuevo_stock_umbral = int(stock_umbral_input.value)
 
-            if nuevo_tiempo_umbral <= 0 or nuevo_stock_umbral < 0:
-                print("Los umbrales deben ser números positivos (tiempo) o cero/negativos (stock).")
+            if nuevo_tiempo_umbral <= 0:
+                print("El umbral de tiempo debe ser un número positivo.")
                 # Opcional: Mostrar una alerta en la UI
                 def cerrar_alerta(e):
                     page.close(dlg_error)
                 
                 dlg_error = ft.AlertDialog(
                     title=ft.Text("Error"),
-                    content=ft.Text("Los umbrales deben ser números positivos (tiempo) o cero/negativos (stock)."),
+                    content=ft.Text("El umbral de tiempo debe ser un número positivo."),
                     actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta)],
                     actions_alignment=ft.MainAxisAlignment.END,
                 )
@@ -945,14 +937,13 @@ def crear_vista_personalizacion(app_instance):
                 app_instance.page.update()
                 return
 
-            # Actualizar los valores en la instancia de la aplicación
+            # Actualizar el valor en la instancia de la aplicación
             app_instance.tiempo_umbral_minutos = nuevo_tiempo_umbral
-            app_instance.umbral_stock_bajo = nuevo_stock_umbral
 
             # Guardar la configuración en el archivo
             app_instance.guardar_configuracion()
 
-            print(f"Configuración actualizada: Tiempo umbral: {nuevo_tiempo_umbral} min, Stock umbral: {nuevo_stock_umbral}")
+            print(f"Configuración actualizada: Tiempo umbral: {nuevo_tiempo_umbral} min")
 
             # Opcional: Mostrar mensaje de éxito
             def cerrar_alerta_ok(e):
@@ -969,14 +960,14 @@ def crear_vista_personalizacion(app_instance):
             app_instance.page.update()
 
         except ValueError:
-            print("Por favor, ingrese valores numéricos válidos.")
+            print("Por favor, ingrese un valor numérico válido para el tiempo umbral.")
             # Opcional: Mostrar una alerta en la UI
             def cerrar_alerta_val(e):
                 page.close(dlg_error_val)
             
             dlg_error_val = ft.AlertDialog(
                 title=ft.Text("Error"),
-                content=ft.Text("Por favor, ingrese valores numéricos válidos."),
+                content=ft.Text("Por favor, ingrese un valor numérico válido para el tiempo umbral."),
                 actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta_val)],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
@@ -988,10 +979,9 @@ def crear_vista_personalizacion(app_instance):
         content=ft.Column([
             ft.Text("Personalización de Alertas", size=24, weight=ft.FontWeight.BOLD),
             ft.Divider(),
-            ft.Text("Establece los umbrales para las alertas de retraso de pedidos y bajo stock.", size=16),
+            ft.Text("Establece el umbral para las alertas de retraso de pedidos.", size=16),
             ft.Divider(),
             tiempo_umbral_input,
-            stock_umbral_input,
             ft.ElevatedButton(
                 "Guardar Configuración",
                 on_click=guardar_configuracion_click,
