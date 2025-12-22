@@ -6,6 +6,9 @@ from pydantic import BaseModel
 from typing import List
 import psycopg2
 from psycopg2.extras import RealDictCursor
+# --- IMPORTAR LA EXCEPCIÓN DE INTEGRIDAD ---
+import psycopg2.errors
+# --- FIN IMPORTAR ---
 
 DATABASE_URL = "dbname=restaurant_db user=postgres password=postgres host=localhost port=5432"
 
@@ -135,11 +138,32 @@ def actualizar_item_inventario(item_id: int, update_data: InventarioUpdate, conn
             "fecha_actualizacion": str(result['fecha_actualizacion'])
         }
 
+# --- CORRECCIÓN: Capturar la excepción de integridad referencial ---
 @inventario_app.delete("/{item_id}")
-def eliminar_item_inventario(item_id: int, conn: psycopg2.extensions.connection = Depends(get_db)):
+def eliminar_item_inventario(item_id: int, conn = Depends(get_db)):
     with conn.cursor() as cursor:
-        cursor.execute("DELETE FROM inventario WHERE id = %s", (item_id,))
-        if cursor.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Ítem no encontrado")
-        conn.commit()
-        return {"status": "ok"}
+        try:
+            cursor.execute("DELETE FROM inventario WHERE id = %s", (item_id,))
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Ítem no encontrado")
+            conn.commit()
+            return {"status": "ok"}
+        # Capturar la excepción específica de PostgreSQL por la restricción ON DELETE RESTRICT
+        except psycopg2.errors.ForeignKeyViolation as e:
+            conn.rollback() # Revertir la transacción en caso de error
+            # Devolver un error 400 indicando que el ítem está en uso
+            raise HTTPException(status_code=400, detail=f"No se puede eliminar el ítem porque está siendo utilizado en una receta: {str(e)}")
+        # Opcional: Capturar otras excepciones de integridad si es necesario
+        except psycopg2.errors.IntegrityError as e:
+            conn.rollback() # Revertir la transacción en caso de error
+            print(f"Error de integridad al eliminar ítem {item_id}: {e}") # Para depuración
+            raise HTTPException(status_code=500, detail="Error interno del servidor al eliminar el ítem.")
+
+# --- FIN CORRECCIÓN ---
+
+# Opcional: Si tienes una app principal, asegúrate de montar esta sub-app correctamente.
+# Por ejemplo, si tienes una app principal llamada `app`, podrías hacer:
+# from fastapi import FastAPI
+# app = FastAPI()
+# app.mount("/inventario", inventario_app)
+# Pero esto depende de cómo tengas estructurado tu backend principal.

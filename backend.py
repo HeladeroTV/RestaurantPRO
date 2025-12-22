@@ -202,21 +202,54 @@ def obtener_pedidos_activos(conn: psycopg2.extensions.connection = Depends(get_d
             })
         return pedidos
 
+# --- MODIFICACIÓN EN EL ENDPOINT DE ACTUALIZACIÓN DE ESTADO ---
 @app.patch("/pedidos/{pedido_id}/estado")
-def actualizar_estado_pedido(pedido_id: int, estado: str, conn: psycopg2.extensions.connection = Depends(get_db)):
-    # Agregar "Pagado" a la lista de estados válidos
-    if estado not in ["Pendiente", "En preparacion", "Listo", "Entregado", "Pagado"]: # <-- Añadido "Pagado"
-        raise HTTPException(status_code=400, detail="Estado inválido")
-    
+def actualizar_estado_pedido(pedido_id: int, estado: str, conn = Depends(get_db)):
     with conn.cursor() as cursor:
-        cursor.execute(
-            "UPDATE pedidos SET estado = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-            (estado, pedido_id)
-        )
-        if cursor.rowcount == 0:
+        # Verificar si el pedido existe
+        cursor.execute("SELECT estado, hora_inicio_cocina, hora_fin_cocina FROM pedidos WHERE id = %s", (pedido_id,))
+        pedido = cursor.fetchone()
+        if not pedido:
             raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
+        # --- LÓGICA PARA REGISTRAR MARCAS DE TIEMPO ---
+        now = datetime.now()
+        extra_update = ""
+        extra_values = []
+
+        if estado == "En preparacion" and pedido['hora_inicio_cocina'] is None:
+            # Solo registrar si es la primera vez que entra en "En preparacion"
+            extra_update = ", hora_inicio_cocina = %s"
+            extra_values.append(now)
+        elif estado == "Listo" and pedido['hora_inicio_cocina'] is not None and pedido['hora_fin_cocina'] is None:
+            # Registrar fin solo si hay un inicio registrado y aún no se ha registrado el fin
+            extra_update = ", hora_fin_cocina = %s"
+            extra_values.append(now)
+        # Opcional: Podrías limpiar hora_inicio_cocina si el estado vuelve a "Pendiente", pero eso complica la lógica.
+        # --- FIN LÓGICA ---
+
+        # Actualizar el estado (y potencialmente las marcas de tiempo)
+        update_query = f"UPDATE pedidos SET estado = %s {extra_update} WHERE id = %s RETURNING id, mesa_numero, cliente_id, estado, fecha_hora, items, numero_app, notas, updated_at, hora_inicio_cocina, hora_fin_cocina"
+        cursor.execute(update_query, (estado, *extra_values, pedido_id)) # *extra_values para desempaquetar los valores opcionales
+        result = cursor.fetchone()
+
+        if not result:
+            raise HTTPException(status_code=404, detail="Pedido no encontrado")
+
         conn.commit()
-        return {"status": "ok"}
+
+        # Devolver el pedido actualizado
+        pedido_dict = dict(result)
+        # Opcional: Calcular el tiempo transcurrido aquí si se envía al cliente
+        if pedido_dict['hora_inicio_cocina'] and pedido_dict['hora_fin_cocina']:
+            tiempo_cocina = (pedido_dict['hora_fin_cocina'] - pedido_dict['hora_inicio_cocina']).total_seconds() / 60 # En minutos
+            pedido_dict['tiempo_cocina_minutos'] = tiempo_cocina
+        elif pedido_dict['hora_inicio_cocina'] and estado == "Listo": # Solo si se acaba de marcar como listo y hay inicio
+             tiempo_cocina = (now - pedido_dict['hora_inicio_cocina']).total_seconds() / 60 # En minutos
+             pedido_dict['tiempo_cocina_minutos'] = tiempo_cocina
+
+        return pedido_dict
+# --- FIN MODIFICACIÓN ---
 
 @app.get("/mesas")
 def obtener_mesas(conn: psycopg2.extensions.connection = Depends(get_db)):
@@ -983,3 +1016,52 @@ def obtener_ventas_por_hora(
         traceback.print_exc() # Imprime el traceback completo
         raise HTTPException(status_code=500, detail=f"Error interno del servidor al calcular ventas por hora: {str(e)}")
 # --- FIN NUEVO ENDPOINT CORREGIDO ---
+
+# --- NUEVO ENDPOINT: Eficiencia de Cocina ---
+@app.get("/reportes/eficiencia_cocina")
+def get_eficiencia_cocina(tipo: str, start_date: str, end_date: str, conn = Depends(get_db)):
+    """
+    Obtiene estadísticas de eficiencia de cocina para un rango de fechas.
+    """
+    with conn.cursor() as cursor:
+        # Consulta para obtener pedidos que tengan hora_inicio_cocina y hora_fin_cocina
+        # y que estén dentro del rango de fechas.
+        # Filtrar por estado que indica que cocina terminó (Listo, Entregado, Pagado)
+        # Suponiendo que hora_fin_cocina se registra al pasar a 'Listo'.
+        query = """
+            SELECT
+                id,
+                hora_inicio_cocina,
+                hora_fin_cocina,
+                (EXTRACT(EPOCH FROM (hora_fin_cocina - hora_inicio_cocina)) / 60.0) AS tiempo_cocina_minutos
+            FROM pedidos
+            WHERE
+                hora_inicio_cocina IS NOT NULL
+                AND hora_fin_cocina IS NOT NULL
+                AND hora_inicio_cocina >= %s
+                AND hora_fin_cocina <= %s
+                AND estado IN ('Listo', 'Entregado', 'Pagado') -- Ajustar según sea necesario
+            ORDER BY hora_fin_cocina; -- O por id, o por hora_inicio_cocina
+        """
+        cursor.execute(query, (start_date, end_date))
+        pedidos_db = cursor.fetchall()
+
+        if not pedidos_db:
+            return {"promedio_minutos": 0, "detalle_pedidos": []}
+
+        tiempos = [row['tiempo_cocina_minutos'] for row in pedidos_db]
+        promedio = sum(tiempos) / len(tiempos)
+
+        detalle = [
+            {
+                "id": row['id'],
+                "tiempo": row['tiempo_cocina_minutos']
+            }
+            for row in pedidos_db
+        ]
+
+        return {
+            "promedio_minutos": promedio,
+            "detalle_pedidos": detalle
+        }
+# --- FIN NUEVO ENDPOINT ---

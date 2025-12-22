@@ -189,7 +189,9 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
                 # Botón Eliminar
                 boton_eliminar = ft.ElevatedButton(
                     text="Eliminar",
-                    on_click=lambda e, id=item_id: eliminar_item_click(id),
+                    # --- MODIFICACIÓN: Permitir eliminar si cantidad_disponible <= 0 ---
+                    # on_click=lambda e, id=item_id: eliminar_item_click(id) # <-- LÍNEA ANTERIOR
+                    on_click=lambda e, id=item_id: eliminar_item_click(id), # <-- LÍNEA NUEVA (mismo comportamiento, pero revisamos la lógica en eliminar_item_click)
                     style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
                 )
 
@@ -298,6 +300,32 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
 
     def eliminar_item_click(item_id: int):
         try:
+            # --- MODIFICACIÓN: Obtener el ítem antes de eliminar para verificar la cantidad ---
+            items = inventory_service.obtener_inventario()
+            item_a_eliminar = next((item for item in items if item['id'] == item_id), None)
+            if not item_a_eliminar:
+                print(f"Ítem con ID {item_id} no encontrado.")
+                return
+
+            # Verificar si la cantidad es mayor a 0
+            if item_a_eliminar['cantidad_disponible'] > 0:
+                print(f"No se puede eliminar el ítem '{item_a_eliminar['nombre']}' porque tiene {item_a_eliminar['cantidad_disponible']} unidades disponibles.")
+                # Mostrar una alerta en la interfaz de Flet
+                def cerrar_alerta(e):
+                    page.close(dlg_error)
+                
+                dlg_error = ft.AlertDialog(
+                    title=ft.Text("No se puede eliminar"),
+                    content=ft.Text(f"No se puede eliminar '{item_a_eliminar['nombre']}' porque tiene {item_a_eliminar['cantidad_disponible']} unidades disponibles."),
+                    actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta)],
+                    actions_alignment=ft.MainAxisAlignment.END,
+                )
+                page.dialog = dlg_error
+                dlg_error.open = True
+                page.update()
+                return # Salir de la función sin eliminar
+            # --- FIN MODIFICACIÓN ---
+
             inventory_service.eliminar_item_inventario(item_id)
             on_update_ui() # Actualiza toda la UI, incluyendo inventario
         except requests.exceptions.HTTPError as http_err:
@@ -351,7 +379,7 @@ def crear_vista_inventario(inventory_service, on_update_ui, page):
 
     vista = ft.Container(
         content=ft.Column([
-            alerta_umbral, # <-- AÑADIR EL CONTENEDOR DE ALERTA AL PRINCIPIO
+            alerta_umbral, # <-- AÑADIR EL CONTENADOR DE ALERTA AL PRINCIPIO
             ft.Divider(),
             ft.Text("Agregar nuevo ítem", size=18, weight=ft.FontWeight.BOLD),
             nombre_input,

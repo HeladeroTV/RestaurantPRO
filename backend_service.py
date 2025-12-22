@@ -219,3 +219,38 @@ class BackendService:
         r.raise_for_status()
         return r.json()
     # --- FIN NUEVO MÉTODO ---
+    
+    # --- NUEVO MÉTODO: obtener_eficiencia_cocina ---
+    def obtener_eficiencia_cocina(self, tipo: str, fecha: datetime) -> Dict[str, Any]:
+        """
+        Obtiene estadísticas de eficiencia de cocina para un tipo y fecha específicos.
+        Args:
+            tipo (str): "Diario", "Semanal", "Mensual", "Anual".
+            fecha (datetime): Fecha de referencia para el cálculo.
+        Returns:
+            Dict[str, Any]: Diccionario con 'promedio_minutos' y 'detalle_pedidos'.
+        """
+        # Construir parámetros de fecha (igual que en obtener_reporte)
+        if tipo == "Diario":
+            start_date = fecha.strftime("%Y-%m-%d")
+            end_date = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
+        elif tipo == "Semanal":
+            start_date = (fecha - timedelta(days=fecha.weekday())).strftime("%Y-%m-%d")
+            end_date = (fecha + timedelta(days=6 - fecha.weekday())).strftime("%Y-%m-%d")
+        elif tipo == "Mensual":
+            start_date = fecha.replace(day=1).strftime("%Y-%m-%d")
+            end_date = (fecha.replace(day=1) + timedelta(days=32)).replace(day=1).strftime("%Y-%m-%d")
+        else:  # Anual
+            start_date = fecha.replace(month=1, day=1).strftime("%Y-%m-%d")
+            end_date = fecha.replace(month=12, day=31).strftime("%Y-%m-%d")
+
+        # Llamar al nuevo endpoint
+        params = {
+            "tipo": tipo.lower(),
+            "start_date": start_date,
+            "end_date": end_date
+        }
+        r = requests.get(f"{self.base_url}/reportes/eficiencia_cocina", params=params)
+        r.raise_for_status()
+        return r.json()
+    # --- FIN NUEVO MÉTODO ---
