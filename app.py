@@ -20,6 +20,7 @@ from reservas_service import ReservasService # Asumiendo que creas este archivo
 # --- AÑADIR ESTOS IMPORTS ---
 from recetas_view import crear_vista_recetas
 from recetas_service import RecetasService
+from bienvenida_view import crear_vista_bienvenida
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
@@ -105,6 +106,32 @@ def crear_selector_item(menu):
                     return item
         return None
     container.get_selected_item = get_selected_item
+    
+    # --- UPDATE: Función para actualizar el menú dinámicamente ---
+    def actualizar_menu(nuevo_menu):
+        nonlocal menu
+        menu = nuevo_menu
+        nuevos_tipos = sorted(list(set(item["tipo"] for item in menu)))
+        
+        # Guardar selección actual si es posible
+        tipo_previo = tipo_dropdown.value
+        
+        tipo_dropdown.options = [ft.dropdown.Option(t) for t in nuevos_tipos]
+        
+        if nuevos_tipos:
+            if tipo_previo in nuevos_tipos:
+                tipo_dropdown.value = tipo_previo
+            else:
+                tipo_dropdown.value = nuevos_tipos[0]
+        else:
+            tipo_dropdown.value = None
+            
+        # Refrescar items
+        filtrar_items(None)
+        
+    container.actualizar_menu = actualizar_menu
+    # --- FIN UPDATE ---
+    
     return container
 
 def crear_mesas_grid(backend_service, on_select):
@@ -581,11 +608,46 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
             # Reiniciar el selector de cantidad
             cantidad_dropdown.value = "1"
             cantidad_dropdown.disabled = True
+            
+            # --- NUEVO: LIMPIAR ESTADO DE LA UI PARA QUE NO QUEDE EL RESUMEN ---
+            estado["pedido_actual"] = None
+            estado["mesa_seleccionada"] = None
+            
+            # Limpiar campos de texto
+            mesa_info.value = ""
+            resumen_pedido.value = ""
+            nota_pedido.value = ""
+            
+            # Actualizar botones
+            actualizar_estado_botones()
+            # --- FIN NUEVO ---
+
             on_update_ui()  # ✅ ACTUALIZA LAS OTRAS PESTAÑAS
             # Reproducir sonido en un hilo separado para no bloquear la UI
             threading.Thread(target=reproducir_sonido_pedido, daemon=True).start()
         except Exception as ex:
             print(f"Error al confirmar pedido: {ex}")
+            # --- MOSTRAR ERROR AL USUARIO CON ALERT DIALOG ---
+            msg_error = str(ex)
+            
+            # Función para cerrar el diálogo
+            def cerrar_alerta_stock(e):
+                page.close(dlg_alerta)
+
+            # Crear el diálogo
+            dlg_alerta = ft.AlertDialog(
+                title=ft.Text("⚠️ No se puede tomar la orden", color="red"),
+                content=ft.Text(f"{msg_error}", size=16),
+                actions=[
+                    ft.TextButton("Entendido", on_click=cerrar_alerta_stock),
+                ],
+                actions_alignment=ft.MainAxisAlignment.END,
+            )
+            
+            # Utilizando el método moderno de Flet para abrir diálogos
+            page.open(dlg_alerta)
+            page.update()
+            # --- FIN MOSTRAR ERROR ---
     asignar_btn.on_click = asignar_cliente
     agregar_item_btn.on_click = agregar_item_pedido
     eliminar_ultimo_btn.on_click = eliminar_ultimo_item
@@ -632,6 +694,17 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
         expand=True
     )
     panel.seleccionar_mesa = seleccionar_mesa_interna
+    
+    # --- UPDATE: Propagar actualización de menú ---
+    def actualizar_menu(nuevo_menu):
+        nonlocal menu
+        menu = nuevo_menu
+        if hasattr(selector_item, 'actualizar_menu'):
+            selector_item.actualizar_menu(nuevo_menu)
+            
+    panel.actualizar_menu = actualizar_menu
+    # --- FIN UPDATE ---
+    
     return panel
 
 # === FUNCIÓN: crear_vista_cocina ===
@@ -1370,6 +1443,7 @@ class RestauranteGUI:
         self.vista_configuraciones = crear_vista_configuraciones(
             self.config_service,
             self.inventory_service,
+            self.backend_service, # ✅ AÑADIDO: Pasar backend_service
             self.actualizar_ui_completo,
             page
         )
@@ -1378,6 +1452,8 @@ class RestauranteGUI:
         # --- CREAR Y ASIGNAR LA VISTA DE PERSONALIZACIÓN ---
         self.vista_personalizacion = crear_vista_personalizacion(self) # <-- Crear la vista y pasar la instancia de la app
         # --- FIN CREAR Y ASIGNAR LA VISTA DE PERSONALIZACIÓN ---
+        self.vista_bienvenida = crear_vista_bienvenida(self.backend_service, self.actualizar_ui_completo, page)
+
         tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
@@ -1435,6 +1511,11 @@ class RestauranteGUI:
                     text="Reportes",
                     icon=ft.Icons.ANALYTICS,
                     content=self.vista_reportes
+                ),
+                ft.Tab(
+                    text="Bienvenida / Config",
+                    icon=ft.Icons.HOME,
+                    content=self.vista_bienvenida
                 ),
             ],
             expand=1
@@ -1564,11 +1645,17 @@ class RestauranteGUI:
         # --- FIN AÑADIR ESTA LÍNEA ---
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
-        # --- ACTUALIZAR VISIBILIDAD DEL INDICADOR Y DETALLE ---
         if hasattr(self, 'actualizar_visibilidad_alerta'):
             self.actualizar_visibilidad_alerta()
         # --- FIN ACTUALIZAR VISIBILIDAD ---
 
+        # --- UPDATE: Recargar menú si es necesario y propagar ---
+        self.recargar_menu()
+        if hasattr(self.panel_gestion, 'actualizar_menu'):
+            self.panel_gestion.actualizar_menu(self.menu_cache)
+        if hasattr(self.vista_admin, 'actualizar_menu'):
+            self.vista_admin.actualizar_menu(self.menu_cache)
+        
         # --- MOSTRAR ALERTAS DE RETRASOS ---
         # Esta lógica ya se maneja en actualizar_visibilidad_alerta
         # No es necesario hacer nada adicional aquí
@@ -1601,8 +1688,6 @@ class RestauranteGUI:
         # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
         self.actualizar_ui_completo() # <-- Opción que asegura actualización general
 
-    # --- NUEVA FUNCIÓN: toggle_detalle_retrasos ---
-    # Alterna la visibilidad del detalle de pedidos retrasados.
     def toggle_detalle_retrasos(self, e):
         """Alterna la visibilidad del panel de detalles de pedidos retrasados."""
         self.mostrar_detalle_retrasos = not self.mostrar_detalle_retrasos
@@ -1610,6 +1695,18 @@ class RestauranteGUI:
         # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
         self.actualizar_ui_completo() # <-- Opción que asegura actualización general
     # --- FIN NUEVA FUNCIÓN ---
+
+    # --- UPDATE: Método para recargar el menú desde el backend ---
+    def recargar_menu(self):
+        try:
+            # Obtener menú actualizado
+            menu_actual = self.backend_service.obtener_menu()
+            # Comparar len o hash simple para ver si cambió algo y evitar updates innecesarios 
+            # (opcional, por ahora lo forzamos para asegurar consistencia)
+            self.menu_cache = menu_actual
+        except Exception as e:
+            print(f"Error recargando menú: {e}")
+    # --- FIN UPDATE ---
 
 # === FUNCIÓN: crear_vista_personalizacion ===
 # Crea la vista para personalizar umbrales de alerta.

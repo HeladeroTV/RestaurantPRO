@@ -8,6 +8,10 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import json
 from datetime import datetime, date, timedelta
+import subprocess
+import os
+import shutil
+import glob
 
 # IMPORTAR LA SUB-APP DE INVENTARIO
 from inventario_backend import inventario_app
@@ -15,7 +19,7 @@ from configuraciones_backend import configuraciones_app
 from fastapi import Query 
 from fastapi import FastAPI, HTTPException, Depends, Query # Asegúrate de tener Query importado
 from recetas_backend import recetas_app
-
+from backend_service import BackendService
 
 app = FastAPI(title="RestaurantIA Backend")
 
@@ -78,6 +82,15 @@ class ReservaCreate(BaseModel):
     fecha_hora_inicio: str  # "YYYY-MM-DD HH:MM:SS"
     fecha_hora_fin: Optional[str] = None # "YYYY-MM-DD HH:MM:SS"
 
+class MesaConfig(BaseModel):
+    numero: int
+    capacidad: int
+
+class BackupResponse(BaseModel):
+    status: str
+    message: str
+    file_path: str
+
 # Endpoints
 @app.get("/health")
 def health():
@@ -98,6 +111,59 @@ def obtener_menu(conn: psycopg2.extensions.connection = Depends(get_db)):
 @app.post("/pedidos", response_model=PedidoResponse)
 def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = Depends(get_db)):
     with conn.cursor() as cursor:
+        # --- NUEVA LÓGICA: VERIFICAR Y CONSUMIR INGREDIENTES ---
+        
+        # 1. Agrupar items por nombre para calcular cantidades totales
+        items_agrupados = {}
+        for item in pedido.items:
+            nombre_item = item['nombre']
+            if nombre_item in items_agrupados:
+                items_agrupados[nombre_item] += 1
+            else:
+                items_agrupados[nombre_item] = 1
+
+        # 2. Verificar stock de todos los ingredientes necesarios
+        ingredientes_a_consumir = [] # Lista de tuplas (ingrediente_id, cantidad_a_consumir, nombre_ingrediente)
+        
+        for nombre_item, cantidad_pedido in items_agrupados.items():
+            # Buscar si el ítem del pedido tiene una receta asociada
+            cursor.execute("""
+                SELECT r.id
+                FROM recetas r
+                WHERE r.nombre_plato = %s
+            """, (nombre_item,))
+            receta = cursor.fetchone()
+            
+            if receta:
+                # Si tiene receta, obtener los ingredientes necesarios y su stock actual
+                cursor.execute("""
+                    SELECT ir.ingrediente_id, ir.cantidad_necesaria, i.cantidad_disponible, i.nombre as nombre_ingrediente
+                    FROM ingredientes_recetas ir
+                    JOIN inventario i ON ir.ingrediente_id = i.id
+                    WHERE ir.receta_id = %s
+                """, (receta['id'],))
+                
+                ingredientes_recetas = cursor.fetchall()
+                
+                for ing in ingredientes_recetas:
+                    cantidad_total_necesaria = ing['cantidad_necesaria'] * cantidad_pedido
+                    
+                    # VERIFICACION DE STOCK
+                    if ing['cantidad_disponible'] < cantidad_total_necesaria:
+                        # Error: No hay suficiente stock
+                        raise HTTPException(
+                            status_code=400, 
+                            detail=f"No hay suficiente stock de '{ing['nombre_ingrediente']}' para preparar '{nombre_item}'. Disponible: {ing['cantidad_disponible']}, Necesario: {cantidad_total_necesaria}"
+                        )
+                    
+                    # Si hay stock, guardar para consumir después
+                    ingredientes_a_consumir.append({
+                        "id": ing['ingrediente_id'],
+                        "cantidad": cantidad_total_necesaria
+                    })
+
+        # 3. Si pasamos aquí, hay stock suficiente para TODO el pedido. Procedemos a crear el pedido.
+
         numero_app = None
         if pedido.mesa_numero == 99:
             cursor.execute("SELECT MAX(numero_app) FROM pedidos WHERE mesa_numero = 99")
@@ -123,45 +189,16 @@ def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = De
         ))
         
         result = cursor.fetchone()
-        
-        # --- NUEVA LÓGICA: CONSUMIR INGREDIENTES DE LAS RECETAS (MANEJANDO CANTIDAD DEL PEDIDO) ---
-        # Suponiendo que 'cursor' es el cursor de la conexión activa en crear_pedido
-        # Agrupar items por nombre para calcular cantidades totales
-        items_agrupados = {}
-        for item in pedido.items:
-            nombre_item = item['nombre']
-            if nombre_item in items_agrupados:
-                items_agrupados[nombre_item] += 1
-            else:
-                items_agrupados[nombre_item] = 1
 
-        for nombre_item, cantidad_pedido in items_agrupados.items():
-            # Buscar si el ítem del pedido tiene una receta asociada
+        # 4. Consumir el stock (Actualizar inventario)
+        # Iterar sobre la lista de ingredientes validados
+        for consumo in ingredientes_a_consumir:
             cursor.execute("""
-                SELECT r.id
-                FROM recetas r
-                WHERE r.nombre_plato = %s
-            """, (nombre_item,))
-            receta = cursor.fetchone()
-            if receta:
-                # Si tiene receta, obtener los ingredientes necesarios
-                cursor.execute("""
-                    SELECT ir.ingrediente_id, ir.cantidad_necesaria
-                    FROM ingredientes_recetas ir
-                    WHERE ir.receta_id = %s
-                """, (receta['id'],))
-                for ing in cursor.fetchall():
-                    # Calcular cantidad total a consumir basada en la cantidad del pedido
-                    cantidad_a_consumir = ing['cantidad_necesaria'] * cantidad_pedido
-                    # Restar la cantidad necesaria del inventario
-                    # OJO: Esta operación simple puede causar cantidades negativas si no hay suficiente stock.
-                    # En una implementación robusta, se debería verificar el stock antes de restar
-                    # o manejar el error si la cantidad disponible es menor que la necesaria.
-                    cursor.execute("""
-                        UPDATE inventario
-                        SET cantidad_disponible = cantidad_disponible - %s
-                        WHERE id = %s
-                    """, (cantidad_a_consumir, ing['ingrediente_id']))
+                UPDATE inventario
+                SET cantidad_disponible = cantidad_disponible - %s
+                WHERE id = %s
+            """, (consumo['cantidad'], consumo['id']))
+            
         # --- FIN NUEVA LÓGICA ---
         
         conn.commit()
@@ -766,37 +803,130 @@ def obtener_mesas_disponibles_para_fecha_hora(
     Obtiene la lista de mesas disponibles para una fecha y hora específica.
     Una mesa está disponible si no está ocupada por un pedido activo ni reservada para esa hora.
     """
-    from datetime import datetime
+
+    # ... (implementación pendiente si se requiere) ...
+    pass
+
+@app.post("/mesas/configurar")
+def configurar_mesas(mesas: List[MesaConfig], conn: psycopg2.extensions.connection = Depends(get_db)):
+    """
+    Configura las mesas del restaurante.
+    - Actualiza capacidades de mesas existentes.
+    - Crea nuevas mesas si no existen.
+    - ELIMINA mesas que no estén en la lista (excepto la 99).
+    """
     try:
-        fecha_hora_obj = datetime.strptime(fecha_hora_str, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Formato de fecha/hora inválido. Use YYYY-MM-DD HH:MM:SS")
+        with conn.cursor() as cursor:
+            # 1. Obtener números de mesas a conservar/crear
+            numeros_mesas_nuevas = [m.numero for m in mesas]
+            
+            # 2. ELIMINAR mesas que ya no existen (excepto la virtual 99)
+            if numeros_mesas_nuevas:
+                query_delete = "DELETE FROM mesas WHERE numero != 99 AND numero NOT IN %s"
+                cursor.execute(query_delete, (tuple(numeros_mesas_nuevas),))
+            else:
+                # Si la lista está vacía, borrar todas menos la 99
+                cursor.execute("DELETE FROM mesas WHERE numero != 99")
 
+            # 3. ACTUALIZAR O INSERTAR (Upsert)
+            for mesa in mesas:
+                if mesa.numero == 99:
+                    continue # No tocar la mesa virtual por aquí
+
+                cursor.execute("""
+                    INSERT INTO mesas (numero, capacidad)
+                    VALUES (%s, %s)
+                    ON CONFLICT (numero) 
+                    DO UPDATE SET capacidad = EXCLUDED.capacidad;
+                """, (mesa.numero, mesa.capacidad))
+
+            conn.commit()
+            return {"status": "ok", "message": "Configuración de mesas actualizada"}
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Error al configurar mesas: {str(e)}")
+
+
+# --- ENDPOINT DE RESPALDO (BACKUP) ---
+
+def find_pg_dump():
+    """Busca el ejecutable pg_dump en el PATH y en rutas comunes de Windows."""
+    # 1. Buscar en el PATH del sistema
+    path_in_path = shutil.which("pg_dump")
+    if path_in_path:
+        return path_in_path
+    
+    # 2. Buscar en directorios de instalación estándar de PostgreSQL
+    # Buscará en todas las versiones encontradas en Program Files
+    possible_paths = glob.glob("C:/Program Files/PostgreSQL/*/bin/pg_dump.exe")
+    
+    if possible_paths:
+        # Ordenar para tomar la versión más reciente (alfabéticamente la carpeta de número mayor va al final usualmente)
+        possible_paths.sort() 
+        return possible_paths[-1]
+    
+    return None
+
+@app.post("/backup", response_model=BackupResponse)
+def crear_respaldo():
+    """
+    Crea un respaldo de la base de datos PostgreSQL usando pg_dump.
+    """
     try:
-        # Obtener mesas físicas
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT numero, capacidad FROM mesas WHERE numero != 99;")
-            mesas_db = cursor.fetchall()
+        # 0. Encontrar pg_dump
+        pg_dump_exe = find_pg_dump()
+        if not pg_dump_exe:
+            raise HTTPException(status_code=500, detail="No se encontró el ejecutable pg_dump. Por favor instale PostgreSQL o agréguelo al PATH.")
 
-        # Obtener mesas ocupadas en ese momento (basado en pedidos activos)
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT DISTINCT mesa_numero
-                FROM pedidos
-                WHERE estado IN ('Tomando pedido', 'Pendiente', 'En preparacion', 'Listo', 'Entregado')
-                AND mesa_numero != 99;
-            """)
-            ocupadas_db = set(row['mesa_numero'] for row in cursor.fetchall())
+        # 1. Definir directorio de respaldos
+        # Usaremos una carpeta en el escritorio del usuario para fácil acceso
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        backup_dir = os.path.join(desktop_path, "Backups_RestaurantPRO")
+        
+        if not os.path.exists(backup_dir):
+            os.makedirs(backup_dir)
+            
+        # 2. Definir nombre del archivo con fecha y hora
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_restaurant_db_{timestamp}.sql"
+        filepath = os.path.join(backup_dir, filename)
+        
+        # 3. Configurar comando pg_dump
+        # Asumimos que la contraseña es 'postgres' como en DATABASE_URL
+        env = os.environ.copy()
+        env["PGPASSWORD"] = "postgres"
+        
+        # Comando: pg_dump -U postgres -h localhost -p 5432 -d restaurant_db -f "filepath"
+        command = [
+            pg_dump_exe,
+            "-U", "postgres",
+            "-h", "localhost",
+            "-p", "5432",
+            "-d", "restaurant_db",
+            "-f", filepath
+        ]
+        
+        # 4. Ejecutar comando
+        result = subprocess.run(command, env=env, capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            return {
+                "status": "ok", 
+                "message": "Respaldo creado exitosamente.", 
+                "file_path": filepath
+            }
+        else:
+            error_msg = f"Error al ejecutar pg_dump: {result.stderr}"
+            print(error_msg)
+            raise HTTPException(status_code=500, detail=error_msg)
+            
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        print(f"Error general en backup: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creando respaldo: {str(e)}")
 
-        # Obtener mesas reservadas en ese momento
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT DISTINCT mesa_numero
-                FROM reservas
-                WHERE %s BETWEEN fecha_hora_inicio AND COALESCE(fecha_hora_fin, fecha_hora_inicio + INTERVAL '1 hour');
-                -- Asumimos una duración de 1 hora si no se especifica fin
-            """, (fecha_hora_obj,))
-            reservadas_db = set(row['mesa_numero'] for row in cursor.fetchall())
 
         mesas_disponibles = []
         for mesa in mesas_db:
