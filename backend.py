@@ -13,10 +13,80 @@ import os
 import shutil
 import glob
 import logging  # ← AÑADIDO
+from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
+from pathlib import Path
 
-# ====================== SISTEMA DE LOGS GLOBAL ======================
+# Crear carpeta de logs si no existe
+LOGS_DIR = Path("logs")
+LOGS_DIR.mkdir(exist_ok=True)
+
+# Logger principal
 log = logging.getLogger("RestaurantIA")
-# =====================================================================
+log.setLevel(logging.DEBUG)  # Nivel más bajo para capturar todo
+
+# Evitar duplicados si ya tiene handlers (importante en hot-reload de uvicorn)
+if log.handlers:
+    log.handlers.clear()
+
+# Formato bonito y completo
+formatter = logging.Formatter(
+    fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
+
+# === HANDLER 1: Consola con colores (solo en desarrollo) ===
+try:
+    from colorlog import ColoredFormatter
+    console_formatter = ColoredFormatter(
+        "%(log_color)s%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s",
+        datefmt="%H:%M:%S",
+        log_colors={
+            'DEBUG':    'cyan',
+            'INFO':     'green',
+            'WARNING':  'yellow',
+            'ERROR':    'red',
+            'CRITICAL': 'red,bg_white',
+        }
+    )
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(console_formatter)
+    console_handler.setLevel(logging.DEBUG)
+    log.addHandler(console_handler)
+except ImportError:
+    # Si no tiene colorlog instalado, usa formato normal
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.DEBUG)
+    log.addHandler(console_handler)
+
+# === HANDLER 2: Archivo general (rotación diaria, guarda 30 días) ===
+daily_handler = TimedRotatingFileHandler(
+    LOGS_DIR / "restaurantia.log",
+    when="midnight",
+    interval=1,
+    backupCount=30,
+    encoding="utf-8"
+)
+daily_handler.setFormatter(formatter)
+daily_handler.setLevel(logging.INFO)  # Info y superior
+log.addHandler(daily_handler)
+
+# === HANDLER 3: Archivo solo de errores (rotación por tamaño, máx 5MB cada uno) ===
+error_handler = RotatingFileHandler(
+    LOGS_DIR / "errores_criticos.log",
+    maxBytes=5_000_000,  # 5 MB
+    backupCount=10,
+    encoding="utf-8"
+)
+error_handler.setLevel(logging.WARNING)  # Warning, Error y Critical
+error_handler.setFormatter(formatter)
+log.addHandler(error_handler)
+
+# Mensaje de inicio bonito
+log.info("=" * 80)
+log.info("     SISTEMA DE GESTIÓN RESTAURANTIA - LOGS INICIALIZADOS CORRECTAMENTE     ")
+log.info("=" * 80)
+# ============================================================================
 
 # IMPORTAR LAS SUB-APPS
 from inventario_backend import inventario_app
