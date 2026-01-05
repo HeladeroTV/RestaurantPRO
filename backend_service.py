@@ -63,24 +63,6 @@ class BackendService:
         """Obtiene la lista de mesas desde el backend."""
         r = requests.get(f"{self.base_url}/mesas")
         r.raise_for_status()
-        r.raise_for_status()
-        return r.json()
-
-    # === MÉTODO: configurar_mesas ===
-    # Configura las mesas en el backend.
-
-    def configurar_mesas(self, mesas: List[Dict[str, int]]) -> Dict[str, Any]:
-        """
-        Configura las mesas en el backend (crear, actualizar, eliminar).
-        mesas: Lista de diccionarios con 'numero' y 'capacidad'.
-        """
-        r = requests.post(f"{self.base_url}/mesas/configurar", json=mesas)
-        if r.status_code != 200:
-             try:
-                error_detail = r.json().get('detail', r.text)
-             except ValueError:
-                error_detail = r.text
-             raise Exception(f"{error_detail}")
         return r.json()
 
     # === MÉTODO: eliminar_ultimo_item ===

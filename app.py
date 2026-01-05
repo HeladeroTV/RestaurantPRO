@@ -8,6 +8,22 @@ import time
 import requests
 import winsound
 import time as time_module
+import logging  # <-- NUEVO
+
+# ====================== SISTEMA DE LOGS PROFESIONAL ======================
+logging.getLogger("RestaurantIA").handlers.clear()  # Evita duplicados al recargar
+log = logging.getLogger("RestaurantIA")
+
+# Configuración rápida y limpia (sin colores para este primer fragmento, luego lo hacemos brutal)
+log.setLevel(logging.DEBUG)
+if not log.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s | %(levelname)-8s | %(message)s', datefmt='%H:%M:%S')
+    handler.setFormatter(formatter)
+    log.addHandler(handler)
+
+log.info("app.py cargado correctamente - Iniciando módulo principal")
+# ===========================================================================
 
 # IMPORTAR LAS NUEVAS CLASES DE INVENTARIO Y LA NUEVA VISTA DE CAJA
 from inventario_view import crear_vista_inventario
@@ -20,19 +36,22 @@ from reservas_service import ReservasService # Asumiendo que creas este archivo
 # --- AÑADIR ESTOS IMPORTS ---
 from recetas_view import crear_vista_recetas
 from recetas_service import RecetasService
-from bienvenida_view import crear_vista_bienvenida
+
+log.info("Módulos importados correctamente (vistas y servicios)")
 
 # === FUNCIÓN: reproducir_sonido_pedido ===
 # Reproduce una melodía simple cuando se confirma un pedido.
 def reproducir_sonido_pedido():
+    log.debug("Reproduciendo sonido de confirmación de pedido")
     try:
         # Melodía: Do - Mi - Sol
         tones = [523, 659, 784]  # Hz
         for tone in tones:
             winsound.Beep(tone, 200)  # 200 ms por nota
             time_module.sleep(0.05)
+        log.debug("Sonido de pedido reproducido correctamente")
     except Exception as e:
-        print(f"Error al reproducir sonido: {e}")
+        log.error(f"Error al reproducir sonido de pedido: {e}")
 
 # === FUNCIÓN: generar_resumen_pedido ===
 # Genera un texto resumen del pedido actual con items y total.
@@ -42,19 +61,22 @@ def generar_resumen_pedido(pedido):
     total = sum(item["precio"] for item in pedido["items"])
     items_str = "\n".join(f"- {item['nombre']} (${item['precio']:.2f})" for item in pedido["items"])
     titulo = obtener_titulo_pedido(pedido)
+    log.debug(f"Resumen de pedido generado | {titulo} | {len(pedido['items'])} ítems | Total: ${total:.2f}")
     return f"[{titulo}]\n{items_str}\nTotal: ${total:.2f}"
 
 # === FUNCIÓN: obtener_titulo_pedido ===
 # Genera el título del pedido dependiendo si es de mesa o app.
 def obtener_titulo_pedido(pedido):
     if pedido.get("mesa_numero") == 99 and pedido.get("numero_app"):
-        return f"Digital #{pedido['numero_app']:03d}"  # ✅ CAMBIAR A "Digital"
+        titulo = f"Digital #{pedido['numero_app']:03d}"
     else:
-        return f"Mesa {pedido['mesa_numero']}"
+        titulo = f"Mesa {pedido['mesa_numero']}"
+    return titulo
 
 # === FUNCIÓN: crear_selector_item ===
 # Crea un selector con dropdowns para filtrar y elegir items del menú.
 def crear_selector_item(menu):
+    log.debug(f"Creando selector de ítems - Menú con {len(menu)} ítems disponibles")
     tipos = list(set(item["tipo"] for item in menu))
     tipos.sort()
     tipo_dropdown = ft.Dropdown(
@@ -84,6 +106,7 @@ def crear_selector_item(menu):
         items_dropdown.value = None
         if e and e.page:
             e.page.update()
+
     def actualizar_items(e):
         filtrar_items(e)
     tipo_dropdown.on_change = actualizar_items
@@ -103,43 +126,23 @@ def crear_selector_item(menu):
         if tipo and nombre:
             for item in menu:
                 if item["nombre"] == nombre and item["tipo"] == tipo:
+                    log.debug(f"Ítem seleccionado: {nombre} ({tipo}) - Precio: ${item['precio']}")
                     return item
         return None
     container.get_selected_item = get_selected_item
-    
-    # --- UPDATE: Función para actualizar el menú dinámicamente ---
-    def actualizar_menu(nuevo_menu):
-        nonlocal menu
-        menu = nuevo_menu
-        nuevos_tipos = sorted(list(set(item["tipo"] for item in menu)))
-        
-        # Guardar selección actual si es posible
-        tipo_previo = tipo_dropdown.value
-        
-        tipo_dropdown.options = [ft.dropdown.Option(t) for t in nuevos_tipos]
-        
-        if nuevos_tipos:
-            if tipo_previo in nuevos_tipos:
-                tipo_dropdown.value = tipo_previo
-            else:
-                tipo_dropdown.value = nuevos_tipos[0]
-        else:
-            tipo_dropdown.value = None
-            
-        # Refrescar items
-        filtrar_items(None)
-        
-    container.actualizar_menu = actualizar_menu
-    # --- FIN UPDATE ---
-    
+    log.debug("Selector de ítems creado correctamente")
     return container
 
 def crear_mesas_grid(backend_service, on_select):
+    log.debug("Iniciando creación del grid de mesas")
     try:
         # Obtener el estado real de las mesas del backend
         mesas_backend = backend_service.obtener_mesas()
+        log.info(f"Mesas obtenidas del backend: {len(mesas_backend)} mesas")
+        
         # Si el backend no tiene mesas, usar valores por defecto
         if not mesas_backend:
+            log.warning("Backend no devolvió mesas → usando valores por defecto")
             mesas_fisicas = [
                 {"numero": 1, "capacidad": 2, "ocupada": False},
                 {"numero": 2, "capacidad": 2, "ocupada": False},
@@ -151,7 +154,7 @@ def crear_mesas_grid(backend_service, on_select):
         else:
             mesas_fisicas = mesas_backend
     except Exception as e:
-        print(f"Error al obtener mesas del backend: {e}")
+        log.error(f"Error crítico al obtener mesas del backend: {e}")
         # Usar valores por defecto si hay error
         mesas_fisicas = [
             {"numero": 1, "capacidad": 2, "ocupada": False},
@@ -161,39 +164,49 @@ def crear_mesas_grid(backend_service, on_select):
             {"numero": 5, "capacidad": 6, "ocupada": False},
             {"numero": 6, "capacidad": 6, "ocupada": False},
         ]
+
     grid = ft.GridView(
         expand=1,
         runs_count=3,
-        max_extent=220, # Ajustar tamaño máximo de la carta
+        max_extent=220,
         child_aspect_ratio=1.0,
-        spacing=15, # Ajustar espaciado
+        spacing=15,
         run_spacing=15,
         padding=15,
     )
+
+    mesas_ocupadas = 0
+    mesas_reservadas = 0
+    mesas_libres = 0
+
     for mesa in mesas_fisicas:
         if mesa["numero"] == 99:
             continue
-        # Manejar claves de reserva de forma segura
-        ocupada = mesa.get("ocupada", False) # Usar .get() con valor por defecto
-        reservada = mesa.get("reservada", False) # Usar .get() con valor por defecto
-        cliente_reservado_nombre = mesa.get("cliente_reservado_nombre", "N/A") # Usar .get() con valor por defecto
-        fecha_hora_reserva = mesa.get("fecha_hora_reserva", "N/A") # Usar .get() con valor por defecto
-        # Determinar color y estado basado en ocupada y reservada (COLORES ORIGINALES)
+
+        ocupada = mesa.get("ocupada", False)
+        reservada = mesa.get("reservada", False)
+        cliente_reservado_nombre = mesa.get("cliente_reservado_nombre", "N/A")
+        fecha_hora_reserva = mesa.get("fecha_hora_reserva", "N/A")
+
         if ocupada:
             color_base = ft.Colors.RED_700
-            color_estado = ft.Colors.RED_700 # Color para hover
+            color_estado = ft.Colors.RED_700
             estado = "OCUPADA"
             detalle = ""
+            mesas_ocupadas += 1
         elif reservada:
-            color_base = ft.Colors.BLUE_700 # Color para mesa reservada
-            color_estado = ft.Colors.BLUE_700 # Color para hover
+            color_base = ft.Colors.BLUE_700
+            color_estado = ft.Colors.BLUE_700
             estado = "RESERVADA"
             detalle = f"{cliente_reservado_nombre}\n{fecha_hora_reserva}"
+            mesas_reservadas += 1
         else:
             color_base = ft.Colors.GREEN_700
-            color_estado = ft.Colors.GREEN_700 # Color para hover
+            color_estado = ft.Colors.GREEN_700
             estado = "LIBRE"
             detalle = ""
+            mesas_libres += 1
+
         contenido_mesa = ft.Column(
                 alignment=ft.MainAxisAlignment.CENTER,
                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -210,33 +223,32 @@ def crear_mesas_grid(backend_service, on_select):
                     ft.Text(estado, size=14, weight=ft.FontWeight.BOLD)
                 ]
             )
-        # Añadir detalle si existe (para mesas reservadas)
         if detalle:
             contenido_mesa.controls.append(ft.Text(detalle, size=10, color=ft.Colors.WHITE, italic=True))
-        # Carta de Mesa con efectos de hover (USANDO EL COLOR DEL ESTADO COMO FONDO)
+
         carta_mesa = ft.Container(
             key=f"mesa-{mesa['numero']}",
-            bgcolor=color_base, # ✅ USAR EL COLOR DEL ESTADO COMO FONDO
-            border_radius=15, # Bordes más redondeados
+            bgcolor=color_base,
+            border_radius=15,
             padding=15,
             ink=True,
             on_click=lambda e, num=mesa['numero']: on_select(num),
             content=contenido_mesa,
-            # Efectos de hover - AHORA USANDO EL COLOR DEL ESTADO
             animate=ft.Animation(200, "easeOut"),
             animate_scale=ft.Animation(200, "easeOut"),
         )
         def on_hover_mesa(e, carta=carta_mesa, color_base=color_base, color_estado=color_estado):
             if e.data == "true":
-                carta.scale = 1.05 # Aumentar tamaño ligeramente
-                carta.bgcolor = color_estado # Cambiar a color del estado al hacer hover
+                carta.scale = 1.05
+                carta.bgcolor = color_estado
             else:
                 carta.scale = 1.0
-                carta.bgcolor = color_base # Volver al color base
+                carta.bgcolor = color_base
             carta.update()
         carta_mesa.on_hover = lambda e, carta=carta_mesa, color_base=color_base, color_estado=color_estado: on_hover_mesa(e, carta, color_base, color_estado)
         grid.controls.append(carta_mesa)
-    # Mesa virtual (sin cambios)
+
+    # Mesa virtual
     contenido_mesa_virtual = ft.Column(
         alignment=ft.MainAxisAlignment.CENTER,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -249,7 +261,7 @@ def crear_mesas_grid(backend_service, on_select):
                     ft.Text("Digital", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                 ]
             ),
-            ft.Text("📱 Pedido por Digital", size=12, color=ft.Colors.WHITE),
+            ft.Text("Pedidos por Digital", size=12, color=ft.Colors.WHITE),
             ft.Text("Siempre disponible", size=10, color=ft.Colors.WHITE),
         ]
     )
@@ -261,7 +273,7 @@ def crear_mesas_grid(backend_service, on_select):
         ink=True,
         on_click=lambda e: on_select(99),
         width=220,
-        height=150, # Ajustar altura
+        height=150,
         content=contenido_mesa_virtual,
         animate=ft.Animation(200, "easeOut"),
         animate_scale=ft.Animation(200, "easeOut"),
@@ -269,18 +281,22 @@ def crear_mesas_grid(backend_service, on_select):
     def on_hover_mesa_virtual(e, carta=carta_mesa_virtual, color_base=ft.Colors.BLUE_700):
         if e.data == "true":
             carta.scale = 1.05
-            carta.bgcolor = ft.Colors.BLUE_800 # Color más oscuro al hacer hover
+            carta.bgcolor = ft.Colors.BLUE_800
         else:
             carta.scale = 1.0
             carta.bgcolor = color_base
         carta.update()
     carta_mesa_virtual.on_hover = lambda e, carta=carta_mesa_virtual: on_hover_mesa_virtual(e, carta)
     grid.controls.append(carta_mesa_virtual)
+
+    log.info(f"Grid de mesas creado → {mesas_libres} libres | {mesas_reservadas} reservadas | {mesas_ocupadas} ocupadas")
     return grid
+
 
 # === FUNCIÓN: crear_panel_gestion ===
 # Crea el panel lateral para gestionar pedidos de una mesa seleccionada.
-def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color, primary_dark_color): # Añadir los parámetros
+def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color, primary_dark_color):
+    log.debug("Creando panel de gestión de pedidos")
     estado = {"mesa_seleccionada": None, "pedido_actual": None}
     mesa_info = ft.Text("", size=16, weight=ft.FontWeight.BOLD)
     tamaño_grupo_input = ft.TextField(
@@ -300,20 +316,18 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
     # --- NUEVO: Selector de Cantidad ---
     cantidad_dropdown = ft.Dropdown(
         label="Cantidad",
-        options=[ft.dropdown.Option(i) for i in range(1, 11)], # Opciones del 1 al 10
-        value="1", # Valor por defecto
+        options=[ft.dropdown.Option(i) for i in range(1, 11)],
+        value="1",
         width=100,
-        disabled=True # Se habilita cuando se selecciona un ítem
+        disabled=True
     )
-    # --- FIN NUEVO ---
     # --- BOTONES CON EFECTOS DE HOVER ESTILIZADOS ---
     asignar_btn = ft.ElevatedButton(
         text="Asignar Cliente",
         disabled=True,
-        # Usar colores del tema principal para hover
         style=ft.ButtonStyle(
             color={"": "white"},
-            bgcolor={"": ft.Colors.GREEN_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+            bgcolor={"": ft.Colors.GREEN_700, "hovered": primary_dark_color},
         ),
     )
     agregar_item_btn = ft.ElevatedButton(
@@ -321,7 +335,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
         disabled=True,
         style=ft.ButtonStyle(
             color={"": "white"},
-            bgcolor={"": ft.Colors.BLUE_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+            bgcolor={"": ft.Colors.BLUE_700, "hovered": primary_dark_color},
         ),
     )
     eliminar_ultimo_btn = ft.ElevatedButton(
@@ -329,20 +343,20 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
         disabled=True,
         style=ft.ButtonStyle(
             color={"": "white"},
-            bgcolor={"": ft.Colors.RED_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+            bgcolor={"": ft.Colors.RED_700, "hovered": primary_dark_color},
         ),
     )
-    # Nuevo botón: Confirmar Pedido
     confirmar_pedido_btn = ft.ElevatedButton(
         text="Confirmar Pedido",
         disabled=True,
         style=ft.ButtonStyle(
             color={"": "white"},
-            bgcolor={"": ft.Colors.AMBER_700, "hovered": primary_dark_color}, # Cambia a PRIMARY_DARK al hacer hover
+            bgcolor={"": ft.Colors.AMBER_700, "hovered": primary_dark_color},
         ),
     )
     # --- FIN BOTONES ---
     resumen_pedido = ft.Text("", size=14)
+
     def actualizar_estado_botones():
         mesa_seleccionada = estado["mesa_seleccionada"]
         pedido_actual = estado["pedido_actual"]
@@ -351,180 +365,182 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
             agregar_item_btn.disabled = True
             eliminar_ultimo_btn.disabled = True
             confirmar_pedido_btn.disabled = True
-            # --- ACTUALIZACIÓN: Deshabilitar selector de cantidad ---
             cantidad_dropdown.disabled = True
-            # --- FIN ACTUALIZACIÓN ---
             return
         if mesa_seleccionada.get("numero") == 99:
             asignar_btn.disabled = pedido_actual is not None
             agregar_item_btn.disabled = pedido_actual is None
             eliminar_ultimo_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
             confirmar_pedido_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
-            # --- ACTUALIZACIÓN: Habilitar selector de cantidad si hay un pedido ---
             cantidad_dropdown.disabled = pedido_actual is None or selector_item.get_selected_item() is None
-            # --- FIN ACTUALIZACIÓN ---
         else:
             asignar_btn.disabled = mesa_seleccionada.get("ocupada", False)
             agregar_item_btn.disabled = pedido_actual is None
             eliminar_ultimo_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
             confirmar_pedido_btn.disabled = pedido_actual is None or not pedido_actual.get("items", [])
-            # --- ACTUALIZACIÓN: Habilitar selector de cantidad si hay un pedido ---
             cantidad_dropdown.disabled = pedido_actual is None or selector_item.get_selected_item() is None
-            # --- FIN ACTUALIZACIÓN ---
         page.update()
-    # --- ACTUALIZACIÓN: Función para manejar cambio en selector de ítem ---
+
     def on_item_selected(e):
-        # Habilitar el selector de cantidad solo si hay un ítem seleccionado y un pedido actual
         if estado["pedido_actual"] and selector_item.get_selected_item():
             cantidad_dropdown.disabled = False
+            log.debug(f"Selector de cantidad habilitado - Ítem seleccionado")
         else:
             cantidad_dropdown.disabled = True
         page.update()
-    # Asignar la función al cambio de selección en el dropdown de ítems
+
     selector_item.items_dropdown.on_change = on_item_selected
-    # --- FIN ACTUALIZACIÓN ---
+
     def seleccionar_mesa_interna(numero_mesa):
+        log.info(f"Mesa seleccionada por el usuario: {numero_mesa}")
         try:
             mesas = backend_service.obtener_mesas()
             mesa_seleccionada = next((m for m in mesas if m["numero"] == numero_mesa), None)
             estado["mesa_seleccionada"] = mesa_seleccionada
             estado["pedido_actual"] = None
+
             if not mesa_seleccionada:
+                log.warning(f"Mesa {numero_mesa} no encontrada en el backend")
                 return
-            # Validar estado de la mesa
+
             if mesa_seleccionada.get("ocupada", False):
-                # Mesa ocupada, no se puede asignar nuevo cliente aquí, pero se puede gestionar el pedido existente
-                # Buscar pedido existente para esta mesa
+                log.info(f"Mesa {numero_mesa} está ocupada - Buscando pedido activo")
                 pedidos_activos = backend_service.obtener_pedidos_activos()
                 pedido_existente = next((p for p in pedidos_activos if p["mesa_numero"] == numero_mesa and p.get("estado") in ["Tomando pedido", "Pendiente", "En preparacion"]), None)
                 if pedido_existente:
                     estado["pedido_actual"] = pedido_existente
                     mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas (Pedido Activo)"
+                    log.info(f"Pedido activo cargado para Mesa {numero_mesa} - ID: {pedido_existente['id']}")
                 else:
-                    # Caso raro: mesa ocupada pero sin pedido activo visible
                     mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Ocupada (Estado inconsistente)"
-                    estado["pedido_actual"] = None
+                    log.warning(f"Mesa {numero_mesa} marcada como ocupada pero sin pedido activo")
             elif mesa_seleccionada.get("reservada", False):
-                # Mesa reservada, verificar fecha/hora
                 fecha_reserva_str = mesa_seleccionada.get("fecha_hora_reserva")
                 if fecha_reserva_str:
                     try:
-                        # Parsear la fecha de reserva (ajusta el formato si es diferente)
-                        fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S") # Remover microsegundos si existen
+                        fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
                         ahora = datetime.now()
-                        # Permitir asignar si la reserva es ahora o en el pasado reciente (por ejemplo, 30 mins)
-                        # O mostrar un mensaje si es en el futuro
-                        if ahora >= fecha_reserva or (ahora - fecha_reserva).total_seconds() < 1800: # 30 minutos en segundos
+                        if ahora >= fecha_reserva or (ahora - fecha_reserva).total_seconds() < 1800:
                             mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} - Capacidad: {mesa_seleccionada['capacidad']} personas"
+                            log.info(f"Reserva activa permitida - Mesa {numero_mesa}")
                         else:
-                            # Reserva futura, no se debería asignar cliente nuevo aún
                             mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} el {fecha_reserva_str}"
-                            estado["pedido_actual"] = None # No se puede asignar cliente nuevo
-                            # Opcional: Mostrar mensaje o deshabilitar botones
+                            estado["pedido_actual"] = None
                             asignar_btn.disabled = True
                             page.update()
-                            return # Salir sin inicializar el pedido
+                            log.info(f"Reserva futura bloqueada - Mesa {numero_mesa} hasta {fecha_reserva_str}")
+                            return
                     except ValueError:
-                        print(f"Error al parsear fecha de reserva para mesa {numero_mesa}: {fecha_reserva_str}")
+                        log.error(f"Error al parsear fecha de reserva para mesa {numero_mesa}: {fecha_reserva_str}")
                         mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Fecha inválida)"
                 else:
                     mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Sin fecha)"
-            else: # Mesa libre
+            else:
                 mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
-            # ... (resto del código de seleccionar_mesa_interna)
+                log.info(f"Mesa {numero_mesa} libre - Listo para asignar cliente")
+
             resumen_pedido.value = ""
             nota_pedido.value = ""
             actualizar_estado_botones()
         except Exception as e:
-            print(f"Error seleccionando mesa: {e}")
+            log.error(f"Error crítico al seleccionar mesa {numero_mesa}: {e}")
             mesa_info.value = f"Error al seleccionar mesa {numero_mesa}"
+
     def asignar_cliente(e):
         mesa_seleccionada = estado["mesa_seleccionada"]
         if not mesa_seleccionada:
+            log.warning("Intento de asignar cliente sin mesa seleccionada")
             return
-        # Re-validar estado antes de asignar (por si cambió desde que se seleccionó)
-        mesas_actualizadas = backend_service.obtener_mesas()
-        mesa_estado_actual = next((m for m in mesas_actualizadas if m["numero"] == mesa_seleccionada["numero"]), None)
-        if not mesa_estado_actual:
-            print("Error: Mesa no encontrada al asignar cliente.")
-            return
-        # Verificar si la mesa está ocupada o reservada para otra fecha
-        if mesa_estado_actual.get("ocupada", False):
-            print(f"La mesa {mesa_seleccionada['numero']} ya está ocupada.")
-            return # No hacer nada o mostrar mensaje
-        elif mesa_estado_actual.get("reservada", False):
-            # Opcional: Verificar fecha aquí también si no se hizo en seleccionar_mesa_interna
-            fecha_reserva_str = mesa_estado_actual.get("fecha_hora_reserva")
-            if fecha_reserva_str:
-                try:
-                    fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
-                    ahora = datetime.now()
-                    if ahora < fecha_reserva and (fecha_reserva - ahora).total_seconds() >= 1800: # Futura y no dentro de 30 mins
-                        print(f"La mesa {mesa_seleccionada['numero']} está reservada para más tarde.")
-                        return # No hacer nada o mostrar mensaje
-                    # Si llega aquí, es una reserva actual o pasada recientemente, se puede "ocupar"
-                except ValueError:
-                    print(f"Error al parsear fecha de reserva para mesa {mesa_seleccionada['numero']}")
-                    return
+
+        numero_mesa = mesa_seleccionada["numero"]
+        log.info(f"Asignando cliente a Mesa {numero_mesa}")
+
         try:
-            # ✅ CREAR PEDIDO EN MEMORIA (NO EN BASE DE DATOS AÚN)
+            mesas_actualizadas = backend_service.obtener_mesas()
+            mesa_estado_actual = next((m for m in mesas_actualizadas if m["numero"] == numero_mesa), None)
+            if not mesa_estado_actual:
+                log.error(f"Mesa {numero_mesa} desapareció del backend al intentar asignar")
+                return
+
+            if mesa_estado_actual.get("ocupada", False):
+                log.warning(f"Bloqueo: Mesa {numero_mesa} ya está ocupada")
+                return
+            elif mesa_estado_actual.get("reservada", False):
+                fecha_reserva_str = mesa_estado_actual.get("fecha_hora_reserva")
+                if fecha_reserva_str:
+                    try:
+                        fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
+                        ahora = datetime.now()
+                        if ahora < fecha_reserva and (fecha_reserva - ahora).total_seconds() >= 1800:
+                            log.warning(f"Bloqueo por reserva futura: Mesa {numero_mesa}")
+                            return
+                    except ValueError:
+                        log.error(f"Error parseando fecha reserva al asignar Mesa {numero_mesa}")
+
             nuevo_pedido = {
-                "id": None,  # Aún no tiene ID
-                "mesa_numero": mesa_seleccionada["numero"],
+                "id": None,
+                "mesa_numero": numero_mesa,
                 "items": [],
-                "estado": "Tomando pedido",  # ✅ ESTADO TEMPORAL
+                "estado": "Tomando pedido",
                 "fecha_hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "numero_app": None,
-                "notas": nota_pedido.value
+                "notas": nota_pedido.value or ""
             }
             estado["pedido_actual"] = nuevo_pedido
             resumen_pedido.value = ""
             on_update_ui()
             actualizar_estado_botones()
+            log.info(f"Cliente asignado correctamente - Mesa {numero_mesa} | Pedido en memoria creado")
+
         except Exception as ex:
-            print(f"Error asignar cliente: {ex}")
+            log.error(f"Error al asignar cliente a Mesa {numero_mesa}: {ex}")
+
     def agregar_item_pedido(e):
         mesa_seleccionada = estado["mesa_seleccionada"]
         pedido_actual = estado["pedido_actual"]
         if not mesa_seleccionada or not pedido_actual:
+            log.warning("Intento de agregar ítem sin mesa o pedido activo")
             return
         item = selector_item.get_selected_item()
         if not item:
+            log.warning("Intento de agregar ítem sin seleccionar ningún producto")
             return
+
         # --- OBTENER CANTIDAD SELECCIONADA ---
         try:
             cantidad = int(cantidad_dropdown.value)
             if cantidad < 1:
-                cantidad = 1 # Asegurar al menos 1
+                cantidad = 1
         except ValueError:
-            cantidad = 1 # Valor por defecto si hay error
-        # --- FIN OBTENER CANTIDAD ---
+            cantidad = 1
+            log.debug("Valor inválido en cantidad_dropdown → usando 1 por defecto")
+
+        log.info(f"Agregando {cantidad} × '{item['nombre']}' a Mesa {mesa_seleccionada['numero']}")
+
         try:
-            # ✅ SOLO ACTUALIZAR EN MEMORIA SI AÚN NO TIENE ID
             if pedido_actual["id"] is None:
+                # Pedido en memoria
                 items_actuales = pedido_actual.get("items", [])
-                # Agregar el ítem 'cantidad' veces
                 for _ in range(cantidad):
                     items_actuales.append({
                         "nombre": item["nombre"],
                         "precio": item["precio"],
                         "tipo": item["tipo"],
-                        "cantidad": 1 # Cada ítem individual tiene cantidad 1
+                        "cantidad": 1
                     })
                 pedido_actual["items"] = items_actuales
                 estado["pedido_actual"] = pedido_actual
+                log.debug(f"Ítem agregado en memoria - Total ítems: {len(items_actuales)}")
             else:
-                # ✅ SI YA TIENE ID, ACTUALIZAR EN LA BASE DE DATOS
+                # Pedido ya existe en BD
                 items_actuales = pedido_actual.get("items", [])
-                # Agregar el ítem 'cantidad' veces
                 for _ in range(cantidad):
                     items_actuales.append({
                         "nombre": item["nombre"],
                         "precio": item["precio"],
                         "tipo": item["tipo"],
-                        "cantidad": 1 # Cada ítem individual tiene cantidad 1
+                        "cantidad": 1
                     })
-                # Actualizar el pedido en el backend
                 resultado = backend_service.actualizar_pedido(
                     pedido_actual["id"],
                     pedido_actual["mesa_numero"],
@@ -532,126 +548,124 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                     pedido_actual["estado"],
                     pedido_actual.get("notas", "")
                 )
-                # Actualizar el pedido localmente
                 pedido_actual["items"] = items_actuales
                 estado["pedido_actual"] = pedido_actual
-            # Reiniciar el selector de cantidad a 1 después de agregar
+                log.info(f"Ítem agregado a pedido existente (ID: {pedido_actual['id']}) - Total: {len(items_actuales)} ítems")
+
             cantidad_dropdown.value = "1"
-            cantidad_dropdown.disabled = selector_item.get_selected_item() is None # Deshabilitar si no hay ítem seleccionado
-            # Actualizar resumen
+            cantidad_dropdown.disabled = selector_item.get_selected_item() is None
             resumen = generar_resumen_pedido(pedido_actual)
             resumen_pedido.value = resumen
             on_update_ui()
             actualizar_estado_botones()
+
         except Exception as ex:
-            print(f"Error al agregar ítem: {ex}")
+            log.error(f"Error crítico al agregar ítem '{item['nombre']}' a Mesa {mesa_seleccionada['numero']}: {ex}")
+
     def eliminar_ultimo_item(e):
         pedido_actual = estado["pedido_actual"]
         if not pedido_actual:
+            log.warning("Intento de eliminar ítem sin pedido activo")
             return
+
+        log.info(f"Eliminando último ítem de Mesa {estado['mesa_seleccionada']['numero']}")
+
         try:
             if pedido_actual["id"] is None:
-                # ✅ SOLO ACTUALIZAR EN MEMORIA (NO TIENE ID)
                 items = pedido_actual.get("items", [])
                 if items:
-                    items.pop() # Elimina el último ítem agregado (independientemente de la cantidad)
+                    eliminado = items.pop()
                     pedido_actual["items"] = items
                     estado["pedido_actual"] = pedido_actual
-                    resumen = generar_resumen_pedido(pedido_actual)
-                    resumen_pedido.value = resumen
+                    log.debug(f"Ítem eliminado en memoria: {eliminado['nombre']}")
                 else:
                     resumen_pedido.value = "Sin items."
             else:
-                # ✅ SI TIENE ID, ELIMINAR EN LA BASE DE DATOS
-                # OJO: Esto elimina el último ítem agregado, no necesariamente una "unidad" de un ítem repetido
-                # Para eliminar unidades específicas, se necesitaría una lógica más compleja en el backend
                 backend_service.eliminar_ultimo_item(pedido_actual["id"])
                 pedidos_activos = backend_service.obtener_pedidos_activos()
                 pedido_actualizado = next((p for p in pedidos_activos if p["id"] == pedido_actual["id"]), None)
                 if pedido_actualizado:
                     estado["pedido_actual"] = pedido_actualizado
-                    resumen = generar_resumen_pedido(pedido_actualizado)
-                    resumen_pedido.value = resumen
+                    log.info(f"Último ítem eliminado en BD - Pedido ID: {pedido_actual['id']}")
                 else:
                     resumen_pedido.value = "Sin items."
                     estado["pedido_actual"] = None
+                    log.info(f"Pedido {pedido_actual['id']} quedó vacío tras eliminar último ítem")
+
             on_update_ui()
             actualizar_estado_botones()
+
         except Exception as ex:
-            print(f"Error al eliminar ítem: {ex}")
+            log.error(f"Error crítico al eliminar último ítem del pedido: {ex}")
+
     def confirmar_pedido(e):
         pedido_actual = estado["pedido_actual"]
         if not pedido_actual:
+            log.warning("Intento de confirmar pedido sin pedido activo")
             return
         if not pedido_actual.get("items"):
-            return  # ✅ No confirmar si no tiene ítems
+            log.warning("Intento de confirmar pedido vacío")
+            return
+
+        mesa_num = estado["mesa_seleccionada"]["numero"]
+        total = sum(item["precio"] for item in pedido_actual["items"])
+        log.info(f"Confirmando pedido Mesa {mesa_num} | {len(pedido_actual['items'])} ítems | Total: ${total:.2f}")
+
         try:
-            nota_a_guardar = nota_pedido.value.strip() if nota_pedido.value else ""  # ✅ ASEGURAR QUE NO SEA None
+            nota_a_guardar = nota_pedido.value.strip() if nota_pedido.value else ""
+
             if pedido_actual["id"] is None:
-                # ✅ ES UN NUEVO PEDIDO, CREARLO EN LA BASE DE DATOS
                 nuevo_pedido = backend_service.crear_pedido(
                     pedido_actual["mesa_numero"],
                     pedido_actual["items"],
-                    "Pendiente",  # ✅ ESTADO REAL
-                    nota_a_guardar  # ✅ ENVIAR NOTA
+                    "Pendiente",
+                    nota_a_guardar
                 )
                 estado["pedido_actual"] = nuevo_pedido
+                log.info(f"Nuevo pedido creado en BD - ID: {nuevo_pedido['id']} | Mesa: {mesa_num}")
             else:
-                # ✅ ACTUALIZAR UN PEDIDO EXISTENTE
                 backend_service.actualizar_pedido(
                     pedido_actual["id"],
                     pedido_actual["mesa_numero"],
                     pedido_actual["items"],
                     "Pendiente",
-                    nota_a_guardar  # ✅ ENVIAR NOTA
+                    nota_a_guardar
                 )
-            # Reiniciar el selector de cantidad
+                log.info(f"Pedido existente actualizado en BD - ID: {pedido_actual['id']} | Mesa: {mesa_num}")
+
             cantidad_dropdown.value = "1"
             cantidad_dropdown.disabled = True
-            
-            # --- NUEVO: LIMPIAR ESTADO DE LA UI PARA QUE NO QUEDE EL RESUMEN ---
             estado["pedido_actual"] = None
             estado["mesa_seleccionada"] = None
-            
-            # Limpiar campos de texto
             mesa_info.value = ""
             resumen_pedido.value = ""
             nota_pedido.value = ""
-            
-            # Actualizar botones
             actualizar_estado_botones()
-            # --- FIN NUEVO ---
+            on_update_ui()
 
-            on_update_ui()  # ✅ ACTUALIZA LAS OTRAS PESTAÑAS
-            # Reproducir sonido en un hilo separado para no bloquear la UI
             threading.Thread(target=reproducir_sonido_pedido, daemon=True).start()
+            log.info(f"Pedido confirmado exitosamente - Mesa {mesa_num} enviado a cocina")
+
         except Exception as ex:
-            print(f"Error al confirmar pedido: {ex}")
-            # --- MOSTRAR ERROR AL USUARIO CON ALERT DIALOG ---
+            log.error(f"ERROR CRÍTICO al confirmar pedido Mesa {mesa_num}: {ex}")
             msg_error = str(ex)
-            
-            # Función para cerrar el diálogo
             def cerrar_alerta_stock(e):
                 page.close(dlg_alerta)
-
-            # Crear el diálogo
             dlg_alerta = ft.AlertDialog(
-                title=ft.Text("⚠️ No se puede tomar la orden", color="red"),
+                title=ft.Text("No se puede tomar la orden", color="red"),
                 content=ft.Text(f"{msg_error}", size=16),
-                actions=[
-                    ft.TextButton("Entendido", on_click=cerrar_alerta_stock),
-                ],
+                actions=[ft.TextButton("Entendido", on_click=cerrar_alerta_stock)],
                 actions_alignment=ft.MainAxisAlignment.END,
             )
-            
-            # Utilizando el método moderno de Flet para abrir diálogos
             page.open(dlg_alerta)
             page.update()
+
             # --- FIN MOSTRAR ERROR ---
     asignar_btn.on_click = asignar_cliente
     agregar_item_btn.on_click = agregar_item_pedido
     eliminar_ultimo_btn.on_click = eliminar_ultimo_item
     confirmar_pedido_btn.on_click = confirmar_pedido
+
     panel = ft.Container(
         content=ft.Column(
             controls=[
@@ -668,13 +682,11 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                 nota_pedido,
                 ft.Divider(),
                 selector_item,
-                # --- AÑADIR SELECTOR DE CANTIDAD A LA INTERFAZ ---
                 ft.Row([
-                    cantidad_dropdown, # Selector de cantidad
-                    ft.Text("   ", width=10), # Espaciado
-                    agregar_item_btn # Botón Agregar Item
-                ], alignment=ft.MainAxisAlignment.START), # Alinear al inicio
-                # --- FIN AÑADIR SELECTOR ---
+                    cantidad_dropdown,
+                    ft.Text("   ", width=10),
+                    agregar_item_btn
+                ], alignment=ft.MainAxisAlignment.START),
                 eliminar_ultimo_btn,
                 confirmar_pedido_btn,
                 ft.Divider(),
@@ -694,62 +706,60 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
         expand=True
     )
     panel.seleccionar_mesa = seleccionar_mesa_interna
-    
-    # --- UPDATE: Propagar actualización de menú ---
-    def actualizar_menu(nuevo_menu):
-        nonlocal menu
-        menu = nuevo_menu
-        if hasattr(selector_item, 'actualizar_menu'):
-            selector_item.actualizar_menu(nuevo_menu)
-            
-    panel.actualizar_menu = actualizar_menu
-    # --- FIN UPDATE ---
-    
+    log.info("Panel de gestión de pedidos creado correctamente")
     return panel
 
 # === FUNCIÓN: crear_vista_cocina ===
 # Vista de cocina para ver y gestionar pedidos activos.
 def crear_vista_cocina(backend_service, on_update_ui, page):
+    log.debug("Creando vista de Cocina")
+    
     lista_pedidos = ft.ListView(
         expand=1,
         spacing=10,
         padding=20,
         auto_scroll=True,
     )
+
     def actualizar():
         try:
             pedidos = backend_service.obtener_pedidos_activos()
+            pendientes = sum(1 for p in pedidos if p.get("estado") == "Pendiente")
+            en_preparacion = sum(1 for p in pedidos if p.get("estado") == "En preparacion")
+            
+            log.info(f"Actualizando vista Cocina | Pendientes: {pendientes} | En preparación: {en_preparacion}")
+
             lista_pedidos.controls.clear()
             for pedido in pedidos:
-                # ✅ SOLO MOSTRAR SI ESTÁ PENDIENTE O EN PREPARACIÓN
                 if pedido.get("estado") in ["Pendiente", "En preparacion"] and pedido.get("items"):
                     lista_pedidos.controls.append(crear_item_pedido_cocina(pedido, backend_service, on_update_ui))
             page.update()
         except Exception as e:
-            print(f"Error al cargar pedidos: {e}")
+            log.error(f"Error crítico al actualizar vista Cocina: {e}")
+
     def crear_item_pedido_cocina(pedido, backend_service, on_update_ui):
+        pedido_id = pedido["id"]
+        origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
+
         def cambiar_estado(e, p, nuevo_estado):
             try:
                 backend_service.actualizar_estado_pedido(p["id"], nuevo_estado)
-                on_update_ui()  # ✅ ACTUALIZA AMBAS VISTAS
+                log.info(f"Estado cambiado → Pedido {p['id']} | {p.get('estado','?')} → {nuevo_estado}")
+                on_update_ui()
             except Exception as ex:
-                print(f"Error al cambiar estado: {ex}")
+                log.error(f"Error al cambiar estado del pedido {p['id']} a '{nuevo_estado}': {ex}")
+
         def eliminar_pedido_click(e):
             try:
-                # ✅ ELIMINAR EL PEDIDO DE LA BASE DE DATOS
                 backend_service.eliminar_pedido(pedido["id"])
-                on_update_ui()  # ✅ ACTUALIZAR INTERFAZ
+                log.warning(f"Pedido ELIMINADO por cocina → ID: {pedido_id} | {origen}")
+                on_update_ui()
             except Exception as ex:
-                print(f"Error al eliminar pedido: {ex}")
-        origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')}"
-        # --- MODIFICACIÓN PARA MOSTRAR "SIN NOTAS" ---
-        # Verificar si 'notas' existe y no está vacío
-        notas_pedido = pedido.get('notas', '')
-        if not notas_pedido: # Si es None, '', o cualquier valor "falsy"
-            nota = "Sin Nota"
-        else:
-            nota = f"Notas: {notas_pedido}"
-        # --- FIN MODIFICACIÓN ---
+                log.error(f"Error al eliminar pedido {pedido_id} desde cocina: {ex}")
+
+        notas_pedido = pedido.get('notas', '').strip()
+        nota = "Sin Nota" if not notas_pedido else f"Notas: {notas_pedido}"
+
         return ft.Container(
             content=ft.Column([
                 ft.Row([
@@ -762,7 +772,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
                     )
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(nota, color=ft.Colors.YELLOW_200), # <-- Se usa la variable 'nota' modificada
+                ft.Text(nota, color=ft.Colors.YELLOW_200),
                 ft.Row([
                     ft.ElevatedButton(
                         "En preparacion",
@@ -783,6 +793,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             padding=10,
             border_radius=10,
         )
+
     vista = ft.Container(
         content=ft.Column([
             ft.Text("Pedidos en Cocina", size=20, weight=ft.FontWeight.BOLD),
@@ -792,11 +803,15 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
         expand=True
     )
     vista.actualizar = actualizar
+    log.info("Vista de Cocina creada correctamente")
     return vista
 
 def crear_vista_admin(backend_service, menu, on_update_ui, page):
+    log.debug("Creando vista de Administración")
+    
     tipos = list(set(item["tipo"] for item in menu))
     tipos.sort()
+    
     tipo_item_admin = ft.Dropdown(
         label="Tipo de item (Agregar)",
         options=[ft.dropdown.Option(tipo) for tipo in tipos],
@@ -812,67 +827,86 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
         width=250,
     )
     item_eliminar = ft.Dropdown(label="Seleccionar item a eliminar", width=300)
+
     def actualizar_items_eliminar(e):
         tipo = tipo_item_eliminar.value
         items = [item for item in menu if item["tipo"] == tipo]
         item_eliminar.options = [ft.dropdown.Option(item["nombre"]) for item in items]
         item_eliminar.value = None
         page.update()
+        log.debug(f"Dropdown de eliminación actualizado - Tipo: {tipo} | {len(items)} ítems")
+
     tipo_item_eliminar.on_change = actualizar_items_eliminar
     actualizar_items_eliminar(None)
+
     def agregar_item(e):
         tipo = tipo_item_admin.value
         nombre = (nombre_item.value or "").strip()
-        texto_precio = (precio_item.value or "").strip()
-        if not tipo or not nombre or not texto_precio:
+        texto_precio = (precio_item.value or "").strip().replace(",", ".")
+        
+        if not all([tipo, nombre, texto_precio]):
+            log.warning("Intento de agregar ítem con campos vacíos")
             return
-        texto_precio = texto_precio.replace(",", ".")
+            
         try:
             precio = float(texto_precio)
+            if precio <= 0:
+                log.warning(f"Intento de agregar ítem con precio inválido: {precio}")
+                return
         except ValueError:
+            log.warning(f"Precio inválido ingresado: '{texto_precio}'")
             return
-        if precio <= 0:
-            return
+
+        log.info(f"Agregando ítem al menú → '{nombre}' | ${precio:.2f} | Tipo: {tipo}")
         try:
-            # Usar el nuevo método del backend
             backend_service.agregar_item_menu(nombre, precio, tipo)
+            nombre_item.value = precio_item.value = ""
+            page.update()
+            log.info(f"Ítem agregado exitosamente → '{nombre}'")
             on_update_ui()
         except Exception as ex:
-            print(f"Error al agregar item: {ex}")
+            log.error(f"Error al agregar ítem '{nombre}': {ex}")
+
     def eliminar_item(e):
         tipo = tipo_item_eliminar.value
         nombre = item_eliminar.value
         if not tipo or not nombre:
+            log.warning("Intento de eliminar ítem sin seleccionar tipo o nombre")
             return
+
+        log.warning(f"Eliminando ítem del menú → '{nombre}' ({tipo})")
         try:
-            # Usar el nuevo método del backend
             backend_service.eliminar_item_menu(nombre, tipo)
+            item_eliminar.value = None
+            actualizar_items_eliminar(None)
+            log.info(f"Ítem eliminado exitosamente → '{nombre}'")
             on_update_ui()
         except Exception as ex:
-            print(f"Error al eliminar item: {ex}")
-    # Campos para clientes
+            log.error(f"Error al eliminar ítem '{nombre}': {ex}")
+
+    # === GESTIÓN DE CLIENTES ===
     nombre_cliente = ft.TextField(label="Nombre", width=300)
     domicilio_cliente = ft.TextField(label="Domicilio", width=300)
-    # --- CAMBIO 2: Restringir celular a 10 números ---
     celular_cliente = ft.TextField(
         label="Celular",
         width=300,
-        input_filter=ft.NumbersOnlyInputFilter(), # Solo números
+        input_filter=ft.NumbersOnlyInputFilter(),
         prefix_icon=ft.Icons.PHONE,
-        max_length=10 # Máximo 10 caracteres
+        max_length=10
     )
-    # --- FIN CAMBIO 2 ---
-    # ✅ LISTA DE CLIENTES - SIN FONDO ESPECÍFICO
+
     lista_clientes = ft.ListView(
-        expand=True,  # ✅ EXPANDIR PARA OCUPAR TODO EL ESPACIO
+        expand=True,
         spacing=10,
         padding=20,
         auto_scroll=True,
     )
+
     def actualizar_lista_clientes():
         try:
             clientes = backend_service.obtener_clientes()
             lista_clientes.controls.clear()
+            log.info(f"Cargando {len(clientes)} clientes registrados")
             for cliente in clientes:
                 cliente_row = ft.Container(
                     content=ft.Column([
@@ -886,118 +920,107 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
                             style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
                         )
                     ]),
-                    bgcolor=ft.Colors.BLUE_GREY_900, # El contenedor de cada cliente sí tiene fondo
+                    bgcolor=ft.Colors.BLUE_GREY_900,
                     padding=10,
                     border_radius=10
                 )
                 lista_clientes.controls.append(cliente_row)
             page.update()
         except Exception as e:
-            print(f"Error al cargar clientes: {e}")
+            log.error(f"Error crítico al cargar lista de clientes: {e}")
+
     def agregar_cliente_click(e):
-        nombre = nombre_cliente.value
-        domicilio = domicilio_cliente.value
-        celular = celular_cliente.value
-        if not nombre or not domicilio or not celular:
+        nombre = nombre_cliente.value.strip()
+        domicilio = domicilio_cliente.value.strip()
+        celular = celular_cliente.value.strip()
+        
+        if not all([nombre, domicilio, celular]):
+            log.warning("Intento de agregar cliente con campos vacíos")
             return
+        if len(celular) != 10:
+            log.warning(f"Celular inválido: {celular} (debe ser 10 dígitos)")
+            return
+
+        log.info(f"Agregando cliente → {nombre} | {celular}")
         try:
             backend_service.agregar_cliente(nombre, domicilio, celular)
-            nombre_cliente.value = ""
-            domicilio_cliente.value = ""
-            celular_cliente.value = "" # Limpiar campo
+            nombre_cliente.value = domicilio_cliente.value = celular_cliente.value = ""
             actualizar_lista_clientes()
+            log.info(f"Cliente agregado exitosamente → {nombre}")
         except Exception as ex:
-            print(f"Error al agregar cliente: {ex}")
+            log.error(f"Error al agregar cliente '{nombre}': {ex}")
+
     def eliminar_cliente_click(cliente_id: int):
+        log.warning(f"Eliminando cliente ID: {cliente_id}")
         try:
             backend_service.eliminar_cliente(cliente_id)
             actualizar_lista_clientes()
+            log.info(f"Cliente eliminado → ID: {cliente_id}")
         except Exception as ex:
-            print(f"Error al eliminar cliente: {ex}")
-    # --- CAMBIO 1: QUITAR EL FONDO DEL CONTENEDOR PRINCIPAL ---
-    # La vista ahora no tiene un bgcolor específico, por lo tanto heredará el fondo de la página (page.bgcolor = "#0a0e1a")
+            log.error(f"Error al eliminar cliente ID {cliente_id}: {ex}")
+
     vista = ft.Container(
         content=ft.Column([
-            # Sección de menú
             ft.Text("Agregar item al menú", size=20, weight=ft.FontWeight.BOLD),
             tipo_item_admin,
             nombre_item,
             precio_item,
-            ft.ElevatedButton(
-                text="Agregar item",
-                on_click=agregar_item,
-                style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-            ),
+            ft.ElevatedButton("Agregar item", on_click=agregar_item,
+                style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)),
             ft.Divider(),
             ft.Text("Eliminar item del menú", size=20, weight=ft.FontWeight.BOLD),
             tipo_item_eliminar,
             item_eliminar,
-            ft.ElevatedButton(
-                text="Eliminar item",
-                on_click=eliminar_item,
-                style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)
-            ),
+            ft.ElevatedButton("Eliminar item", on_click=eliminar_item,
+                style=ft.ButtonStyle(bgcolor=ft.Colors.RED_700, color=ft.Colors.WHITE)),
             ft.Divider(),
-            # Sección de clientes
             ft.Text("Agregar Cliente", size=20, weight=ft.FontWeight.BOLD),
             nombre_cliente,
             domicilio_cliente,
             celular_cliente,
-            ft.ElevatedButton(
-                "Agregar Cliente",
-                on_click=agregar_cliente_click,
-                style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-            ),
+            ft.ElevatedButton("Agregar Cliente", on_click=agregar_cliente_click,
+                style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)),
             ft.Divider(),
             ft.Text("Clientes Registrados", size=20, weight=ft.FontWeight.BOLD),
-            # ✅ SECCIÓN SEPARADA PARA CLIENTES REGISTRADOS - SIN FONDO ESPECÍFICO
             ft.Container(
                 content=lista_clientes,
-                expand=True,  # ✅ CONTAINER EXPANDIDO
-                height=500,  # ✅ ALTURA AMPLIA
-                # No usar bgcolor aquí para que sea transparente y muestre el fondo de la página
+                expand=True,
+                height=500,
                 padding=10,
                 border_radius=10,
             )
-        ], expand=True, scroll="auto"),  # ✅ SCROLL VERTICAL EN LA COLUMNA
+        ], expand=True, scroll="auto"),
         padding=20,
-        # NO USAR bgcolor aquí, se quita para que use el fondo de la página
-        # bgcolor=ft.Colors.BLUE_GREY_900,  # <-- COMENTAR O ELIMINAR ESTA LÍNEA
-        expand=True  # ✅ CONTAINER PRINCIPAL EXPANDIDO
+        expand=True
     )
-    # --- FIN CAMBIO 1 ---
+    
     vista.actualizar_lista_clientes = actualizar_lista_clientes
+    log.info("Vista de Administración creada correctamente")
     return vista
 
 # === FUNCIÓN: crear_vista_personalizacion ===
 # Crea la vista para personalizar umbrales de alerta.
 def crear_vista_personalizacion(app_instance):
-    """
-    Crea la vista de personalización para umbrales de alerta.
-    Args:
-        app_instance (RestauranteGUI): Instancia de la aplicación principal.
-    Returns:
-        ft.Container: Contenedor con la interfaz de personalización.
-    """
-    # Campo para ingresar el nuevo umbral de tiempo
+    log.debug("Creando vista de Personalización de Alertas")
+    
     tiempo_umbral_input = ft.TextField(
         label="Tiempo umbral para pedidos (minutos)",
-        value=str(app_instance.tiempo_umbral_minutos), # Mostrar valor actual
+        value=str(app_instance.tiempo_umbral_minutos),
         width=300,
-        input_filter=ft.NumbersOnlyInputFilter(), # Solo números
+        input_filter=ft.NumbersOnlyInputFilter(),
         hint_text="Ej: 20"
     )
 
     def guardar_configuracion_click(e):
-        """Guarda el nuevo umbral de tiempo ingresado."""
+        log.info(f"Usuario intenta cambiar umbral de tiempo - Valor ingresado: '{tiempo_umbral_input.value}'")
+        
         try:
             nuevo_tiempo_umbral = int(tiempo_umbral_input.value)
 
             if nuevo_tiempo_umbral <= 0:
-                print("El umbral de tiempo debe ser un número positivo.")
-                # Opcional: Mostrar una alerta en la UI
+                log.warning(f"Valor inválido para umbral: {nuevo_tiempo_umbral} (debe ser > 0)")
                 def cerrar_alerta(e):
-                    page.close(dlg_error)
+                    app_instance.page.close(dlg_error)
                 
                 dlg_error = ft.AlertDialog(
                     title=ft.Text("Error"),
@@ -1010,17 +1033,17 @@ def crear_vista_personalizacion(app_instance):
                 app_instance.page.update()
                 return
 
-            # Actualizar el valor en la instancia de la aplicación
+            # Actualizar instancia
+            viejo_valor = app_instance.tiempo_umbral_minutos
             app_instance.tiempo_umbral_minutos = nuevo_tiempo_umbral
-
-            # Guardar la configuración en el archivo
+            
+            # Guardar en archivo
             app_instance.guardar_configuracion()
 
-            print(f"Configuración actualizada: Tiempo umbral: {nuevo_tiempo_umbral} min")
+            log.info(f"Umbral de retraso actualizado → {viejo_valor} min → {nuevo_tiempo_umbral} min")
 
-            # Opcional: Mostrar mensaje de éxito
             def cerrar_alerta_ok(e):
-                page.close(dlg_success)
+                app_instance.page.close(dlg_success)
             
             dlg_success = ft.AlertDialog(
                 title=ft.Text("Éxito"),
@@ -1033,10 +1056,9 @@ def crear_vista_personalizacion(app_instance):
             app_instance.page.update()
 
         except ValueError:
-            print("Por favor, ingrese un valor numérico válido para el tiempo umbral.")
-            # Opcional: Mostrar una alerta en la UI
+            log.warning(f"Entrada no numérica en umbral de tiempo: '{tiempo_umbral_input.value}'")
             def cerrar_alerta_val(e):
-                page.close(dlg_error_val)
+                app_instance.page.close(dlg_error_val)
             
             dlg_error_val = ft.AlertDialog(
                 title=ft.Text("Error"),
@@ -1065,50 +1087,54 @@ def crear_vista_personalizacion(app_instance):
         expand=True
     )
 
+    log.info("Vista de Personalización creada correctamente")
     return vista
 
 # === CLASE: RestauranteGUI ===
 # Clase principal que maneja la interfaz gráfica y los estados del sistema.
 class RestauranteGUI:
     def __init__(self):
+        log.info("Iniciando RestauranteGUI - Creando instancia principal")
+        
         from backend_service import BackendService
         from configuraciones_service import ConfiguracionesService
-        # from recetas_service import RecetasService # Asumiendo que está importado arriba
+        
         self.backend_service = BackendService()
         self.inventory_service = InventoryService()
         self.config_service = ConfiguracionesService()
-        self.recetas_service = RecetasService() # Añadir si no lo tienes
+        self.recetas_service = RecetasService()
+        
         self.page = None
         self.mesas_grid = None
         self.panel_gestion = None
         self.vista_cocina = None
-        # self.vista_caja = None # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
-        self.vista_caja = None # <-- Asegurar inicialización
+        self.vista_caja = None
         self.vista_admin = None
         self.vista_inventario = None
         self.vista_recetas = None
         self.vista_configuraciones = None
         self.vista_reportes = None
-        self.vista_personalizacion = None  # ✅ AGREGAR ESTO
+        self.vista_personalizacion = None
         self.menu_cache = None
         self.hilo_sincronizacion = None
-        # --- NUEVAS VARIABLES PARA ALERTA DE BAJOS STOCK ---
+        
+        # Alertas de stock
         self.hilo_verificacion_stock = None
-        self.hay_stock_bajo = False # Bandera para indicar si hay stock bajo
-        self.ingredientes_bajos_lista = [] # Lista de nombres de ingredientes bajos
-        self.mostrar_detalle_stock = False # Bandera para mostrar/ocultar el detalle
-        # --- FIN NUEVAS VARIABLES ---
-        # --- NUEVAS VARIABLES PARA ALERTA DE RETRASOS ---
+        self.hay_stock_bajo = False
+        self.ingredientes_bajos_lista = []
+        self.mostrar_detalle_stock = False
+        
+        # Alertas de retrasos
         self.hilo_verificacion_retrasos = None
-        self.lista_alertas_retrasos = [] # Lista de diccionarios con info de alertas {id_pedido, mesa, titulo, tiempo_retraso, ...}
-        self.hay_pedidos_atrasados = False # Bandera para indicar si hay pedidos atrasados
-        self.mostrar_detalle_retrasos = False # Bandera para mostrar/ocultar el detalle de retrasos
-        # --- FIN NUEVAS VARIABLES ---
-        # --- NUEVAS VARIABLES PARA CONFIGURACIÓN ---
-        self.tiempo_umbral_minutos = 20 # Umbral configurable en minutos (inicializado con valor por defecto)
-        self.umbral_stock_bajo = 5 # Umbral configurable para stock bajo (inicializado con valor por defecto)
-        # --- FIN NUEVAS VARIABLES ---
-        # --- COLORES ESTÉTICOS ---
+        self.lista_alertas_retrasos = []
+        self.hay_pedidos_atrasados = False
+        self.mostrar_detalle_retrasos = False
+        
+        # Configuración
+        self.tiempo_umbral_minutos = 20
+        self.umbral_stock_bajo = 5
+        
+        # Colores
         self.PRIMARY = "#6366f1"
         self.PRIMARY_DARK = "#4f46e5"
         self.ACCENT = "#f59e0b"
@@ -1116,17 +1142,20 @@ class RestauranteGUI:
         self.DANGER = "#ef4444"
         self.CARD_BG = "#1a1f35"
         self.CARD_HOVER = "#252b45"
-        # --- FIN COLORES ESTÉTICOS ---
-        self.reservas_service = ReservasService() # Asumiendo que usas la clase ReservasService
-        self.vista_reservas = None # Añadir esta línea
-        # --- CARGAR CONFIGURACIÓN AL INICIAR ---
+        
+        self.reservas_service = ReservasService()
+        self.vista_reservas = None
+        
+        # Cargar configuración al inicio
         self.cargar_configuracion()
+        log.info("RestauranteGUI inicializado correctamente")
 
     # --- FUNCIÓN: cargar_configuracion ---
-    # Carga los umbrales desde un archivo local.
     def cargar_configuracion(self):
+        log.debug("Cargando configuración desde archivo local")
         import json
         from pathlib import Path
+        
         carpeta_datos = Path.home() / ".restaurantia" / "datos"
         carpeta_datos.mkdir(parents=True, exist_ok=True)
         archivo_config = carpeta_datos / "config.json"
@@ -1135,25 +1164,25 @@ class RestauranteGUI:
             try:
                 with open(archivo_config, "r", encoding="utf-8") as f:
                     config = json.load(f)
-                    # Cargar valores si existen, sino usar valores por defecto
-                    self.tiempo_umbral_minutos = config.get("tiempo_umbral_minutos", 20)
-                    self.umbral_stock_bajo = config.get("umbral_stock_bajo", 5)
-                    print(f"Configuración cargada: Tiempo umbral: {self.tiempo_umbral_minutos} min, Stock umbral: {self.umbral_stock_bajo}")
+                    
+                self.tiempo_umbral_minutos = config.get("tiempo_umbral_minutos", 20)
+                self.umbral_stock_bajo = config.get("umbral_stock_bajo", 5)
+                
+                log.info(f"Configuración cargada → Umbral retraso: {self.tiempo_umbral_minutos} min | Umbral stock: {self.umbral_stock_bajo}")
             except Exception as e:
-                print(f"Error al cargar configuración: {e}")
-                # Usar valores por defecto si hay error
+                log.error(f"Error al leer config.json: {e} → Usando valores por defecto")
                 self.tiempo_umbral_minutos = 20
                 self.umbral_stock_bajo = 5
         else:
-            print("Archivo de configuración no encontrado, usando valores por defecto.")
-            # Asegurar que el archivo exista con valores por defecto si no existe
+            log.info("config.json no existe → Creando con valores por defecto")
             self.guardar_configuracion()
 
     # --- FUNCIÓN: guardar_configuracion ---
-    # Guarda los umbrales en un archivo local.
     def guardar_configuracion(self):
+        log.debug("Guardando configuración en archivo local")
         import json
         from pathlib import Path
+        
         carpeta_datos = Path.home() / ".restaurantia" / "datos"
         carpeta_datos.mkdir(parents=True, exist_ok=True)
         archivo_config = carpeta_datos / "config.json"
@@ -1165,237 +1194,192 @@ class RestauranteGUI:
         try:
             with open(archivo_config, "w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
-            print(f"Configuración guardada: Tiempo umbral: {self.tiempo_umbral_minutos} min, Stock umbral: {self.umbral_stock_bajo}")
+            log.info(f"Configuración guardada → {archivo_config}")
         except Exception as e:
-            print(f"Error al guardar configuración: {e}")
-
-    # --- FIN FUNCIONES DE CONFIGURACIÓN ---
+            log.error(f"Error crítico al guardar configuración: {e}")
 
     # --- FUNCIÓN: verificar_stock_periodicamente ---
     def verificar_stock_periodicamente(self):
-        """Verifica el inventario cada 30 segundos y actualiza la bandera."""
+        log.info("Hilo de verificación de stock bajo iniciado (cada 30s)")
         while True:
             try:
                 items = self.inventory_service.obtener_inventario()
-                # VERIFICAR ALERTAS DE INGREDIENTES BAJOS - USAR UMBRAL CONFIGURABLE
-                # umbral_bajo = 5 # UMBRAL PARA AVISAR (PUEDES CAMBIAR ESTE VALOR) # <-- COMENTAR ESTA LINEA
-                ingredientes_bajos = [item for item in items if item['cantidad_disponible'] <= self.umbral_stock_bajo] # <-- USAR self.umbral_stock_bajo
-                # ACTUALIZAR CONTENIDO DE ALERTA
+                ingredientes_bajos = [
+                    item for item in items 
+                    if item['cantidad_disponible'] <= self.umbral_stock_bajo
+                ]
+
                 if ingredientes_bajos:
-                    nombres_bajos = ", ".join([item['nombre'] for item in ingredientes_bajos])
-                    # Actualizar la bandera y la lista de ingredientes bajos
+                    nombres = ", ".join([item['nombre'] for item in ingredientes_bajos])
                     self.hay_stock_bajo = True
                     self.ingredientes_bajos_lista = [item['nombre'] for item in ingredientes_bajos]
-                    print(f"Bandera de stock bajo activada. Ingredientes: {self.ingredientes_bajos_lista}") # Mensaje de depuración
+                    log.warning(f"STOCK BAJO DETECTADO → {len(ingredientes_bajos)} ingredientes: {nombres}")
                 else:
+                    if self.hay_stock_bajo:
+                        log.info("Stock bajo resuelto - Todos los ingredientes por encima del umbral")
                     self.hay_stock_bajo = False
                     self.ingredientes_bajos_lista = []
-                    # Si no hay stock bajo, ocultar el detalle
                     self.mostrar_detalle_stock = False
-                    print("Bandera de stock bajo desactivada.") # Mensaje de depuración
-                time.sleep(30) # VERIFICAR CADA 30 SEGUNDOS
-            except Exception as e:
-                print(f"Error en verificación periódica de inventario (stock): {e}")
-                time.sleep(30) # ESPERAR 30 SEGUNDOS ANTES DE REINTENTAR
 
-    # --- NUEVA FUNCIÓN CORREGIDA: verificar_retrasos_periodicamente ---
+                time.sleep(30)
+            except Exception as e:
+                log.error(f"Error en hilo de verificación de stock: {e}")
+                time.sleep(30)
+
+    # --- FUNCIÓN: verificar_retrasos_periodicamente ---
     def verificar_retrasos_periodicamente(self):
-        """Verifica pedidos activos cada 60 segundos y genera/elimina alertas si exceden el umbral."""
+        log.info("Hilo de verificación de retrasos iniciado (cada 60s)")
         while True:
             try:
                 pedidos_activos = self.backend_service.obtener_pedidos_activos()
                 ahora = datetime.now()
-                nuevos_ids_activos = {pedido['id'] for pedido in pedidos_activos if pedido.get('estado') in ["Pendiente", "En preparacion"]}
+                
+                activos_relevantes = [
+                    p for p in pedidos_activos 
+                    if p.get('estado') in ["Pendiente", "En preparacion"] and p.get('items')
+                ]
 
-                # Filtrar alertas antiguas que ya no estén en pedidos_activos o ya no estén atrasadas
-                alertas_actualizadas = []
+                # Limpiar alertas viejas
+                alertas_vigentes = []
                 for alerta in self.lista_alertas_retrasos:
-                    id_pedido = alerta['id_pedido']
-                    # Verificar si el pedido aún está activo (Pendiente o En preparacion)
-                    pedido_activo = next((p for p in pedidos_activos if p['id'] == id_pedido and p.get('estado') in ["Pendiente", "En preparacion"]), None)
-                    if pedido_activo:
-                        # El pedido sigue activo, verificar si sigue atrasado
+                    pedido = next((p for p in activos_relevantes if p['id'] == alerta['id_pedido']), None)
+                    if pedido:
                         try:
-                            fecha_pedido = datetime.strptime(pedido_activo.get('fecha_hora', ''), "%Y-%m-%d %H:%M:%S")
-                            diferencia = (ahora - fecha_pedido).total_seconds() / 60  # Diferencia en minutos
-                            if diferencia >= self.tiempo_umbral_minutos:
-                                # Aún está atrasado, mantener la alerta
-                                alerta['tiempo_retraso'] = round(diferencia, 2) # Opcional: actualizar el tiempo de retraso mostrado
-                                alertas_actualizadas.append(alerta)
-                            else:
-                                # Ya no está atrasado, no mantener la alerta
-                                print(f"Alerta eliminada para Pedido {id_pedido} - ya no está atrasado.")
-                        except ValueError as ve:
-                            print(f"Error al parsear fecha del pedido {id_pedido} en alertas: {pedido_activo.get('fecha_hora', '')} - {ve}")
-                            # Si hay error de parseo, no mantener la alerta
-                    else:
-                        # El pedido ya no está activo (posiblemente cambió a Listo, Entregado, Pagado, o fue eliminado)
-                        print(f"Alerta eliminada para Pedido {id_pedido} - ya no está activo.")
-                        # No mantener la alerta
+                            fecha_pedido = datetime.strptime(pedido['fecha_hora'].split(".")[0], "%Y-%m-%d %H:%M:%S")
+                            mins_retraso = (ahora - fecha_pedido).total_seconds() / 60
+                            if mins_retraso >= self.tiempo_umbral_minutos:
+                                alerta['tiempo_retraso'] = round(mins_retraso, 1)
+                                alertas_vigentes.append(alerta)
+                        except:
+                            pass
+                    # Si no está o ya no está atrasado → se elimina automáticamente
 
-                # Actualizar la lista de alertas con las filtradas
-                self.lista_alertas_retrasos = alertas_actualizadas
+                self.lista_alertas_retrasos = alertas_vigentes
 
-                # Generar nuevas alertas como antes
-                nuevas_alertas = []
-                ids_alertas_existentes = {alerta['id_pedido'] for alerta in self.lista_alertas_retrasos}
+                # Generar nuevas alertas
+                for pedido in activos_relevantes:
+                    if pedido['id'] in [a['id_pedido'] for a in alertas_vigentes]:
+                        continue
+                    try:
+                        fecha_pedido = datetime.strptime(pedido['fecha_hora'].split(".")[0], "%Y-%m-%d %H:%M:%S")
+                        mins_retraso = (ahora - fecha_pedido).total_seconds() / 60
+                        if mins_retraso >= self.tiempo_umbral_minutos:
+                            titulo = obtener_titulo_pedido(pedido)
+                            self.lista_alertas_retrasos.append({
+                                "id_pedido": pedido['id'],
+                                "titulo_pedido": titulo,
+                                "estado": pedido['estado'],
+                                "tiempo_retraso": round(mins_retraso, 1),
+                                "fecha_hora": fecha_pedido
+                            })
+                            log.warning(f"PEDIDO ATRASADO → {titulo} | {mins_retraso:.1f} min (umbral: {self.tiempo_umbral_minutos})")
+                    except:
+                        continue
 
-                for pedido in pedidos_activos:
-                    estado = pedido.get('estado')
-                    fecha_str = pedido.get('fecha_hora')
-                    # Solo considerar pedidos Pendientes o En Preparación
-                    if estado in ["Pendiente", "En preparacion"] and fecha_str:
-                        try:
-                            fecha_pedido = datetime.strptime(fecha_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
-                            diferencia = (ahora - fecha_pedido).total_seconds() / 60  # Diferencia en minutos
-
-                            if diferencia >= self.tiempo_umbral_minutos:
-                                id_pedido = pedido['id']
-
-                                # Solo agregar si no existe una alerta para este pedido
-                                if id_pedido not in ids_alertas_existentes:
-                                    nueva_alerta = {
-                                        "id_pedido": id_pedido,
-                                        "titulo_pedido": obtener_titulo_pedido(pedido), # Usar la función auxiliar
-                                        "estado": estado,
-                                        "tiempo_retraso": round(diferencia, 2),
-                                        "fecha_hora": fecha_pedido # Opcional: guardar el datetime original
-                                    }
-                                    nuevas_alertas.append(nueva_alerta)
-                                    print(f"Alerta generada para Pedido {id_pedido} en {obtener_titulo_pedido(pedido)} - {diferencia:.2f} minutos retraso.")
-
-                        except ValueError as ve:
-                            print(f"Error al parsear fecha del pedido {pedido.get('id')}: {fecha_str} - {ve}")
-                            continue # Saltar este pedido si hay error de parseo
-
-                # Agregar las nuevas alertas a la lista ya filtrada
-                self.lista_alertas_retrasos.extend(nuevas_alertas)
-
-                # Actualizar la bandera de retrasos basada en la lista actualizada
                 self.hay_pedidos_atrasados = len(self.lista_alertas_retrasos) > 0
 
-                # Opcional: Mantener solo las últimas N alertas
-                # self.lista_alertas_retrasos = self.lista_alertas_retrasos[-10:] # Por ejemplo, últimos 10
-
-                time.sleep(60) # VERIFICAR CADA 60 SEGUNDOS
+                time.sleep(60)
             except Exception as e:
-                print(f"Error en verificación periódica de retrasos: {e}")
-                time.sleep(60) # ESPERAR 60 SEGUNDOS ANTES DE REINTENTAR
-    # --- FIN NUEVA FUNCIÓN CORREGIDA ---
+                log.error(f"Error crítico en hilo de retrasos: {e}")
+                time.sleep(60)
 
     def iniciar_sincronizacion(self):
         """Inicia la sincronización automática en segundo plano."""
+        log.info("Iniciando hilos de sincronización automática")
+
         def actualizar_periodicamente():
             while True:
                 try:
-                    # ✅ ACTUALIZAR INTERFAZ CADA 3 SEGUNDOS
                     self.actualizar_ui_completo()
-                    time.sleep(3)  # ✅ INTERVALO DE ACTUALIZACIÓN
+                    time.sleep(3)
                 except Exception as e:
-                    print(f"Error en sincronización: {e}")
+                    log.error(f"Error crítico en hilo de sincronización UI: {e}")
                     time.sleep(3)
 
-        # ✅ INICIAR HILO DE SINCRONIZACIÓN GENERAL
+        # Hilo principal de UI
         self.hilo_sincronizacion = threading.Thread(target=actualizar_periodicamente, daemon=True)
         self.hilo_sincronizacion.start()
-        # ✅ INICIAR HILO DE VERIFICACIÓN DE STOCK
+        log.info("Hilo de sincronización UI iniciado (cada 3s)")
+
+        # Hilo de stock
         self.hilo_verificacion_stock = threading.Thread(target=self.verificar_stock_periodicamente, daemon=True)
         self.hilo_verificacion_stock.start()
-        # ✅ INICIAR HILO DE VERIFICACIÓN DE RETRASOS
+        log.info("Hilo de verificación de stock bajo iniciado (cada 30s)")
+
+        # Hilo de retrasos
         self.hilo_verificacion_retrasos = threading.Thread(target=self.verificar_retrasos_periodicamente, daemon=True)
         self.hilo_verificacion_retrasos.start()
+        log.info("Hilo de verificación de pedidos atrasados iniciado (cada 60s)")
+
+        log.info("Todos los hilos de fondo iniciados correctamente")
 
     def main(self, page: ft.Page):
+        log.info("main() ejecutado - Iniciando interfaz gráfica RestIA")
+        
         self.page = page
         page.title = "RestIA"
         page.padding = 0
         page.theme_mode = "dark"
-        page.bgcolor = "#0a0e1a" # Aplicar color de fondo oscuro principal
+        page.bgcolor = "#0a0e1a"
+        
         reloj = ft.Text("", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.AMBER_200)
 
-        # --- INDICADOR PRINCIPAL DE STOCK BAJO (Botón) ---
+        # === INDICADORES DE ALERTA ===
         indicador_stock_bajo = ft.Container(
             content=ft.Row([
                 ft.Icon(ft.Icons.WARNING, color=ft.Colors.WHITE, size=20),
                 ft.Text("Stock Bajo", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD)
             ], alignment=ft.MainAxisAlignment.CENTER, spacing=5),
-            bgcolor=self.DANGER, # Usar color de peligro para el indicador
+            bgcolor=self.DANGER,
             padding=5,
             border_radius=5,
             width=120,
             height=30,
-            visible=False, # Inicialmente oculto, se controla en actualizar_ui_completo
-            ink=True, # Para efecto de click
-            on_click=self.toggle_detalle_stock_bajo # Asociar la función de toggle
+            visible=False,
+            ink=True,
+            on_click=self.toggle_detalle_stock_bajo
         )
 
-        # --- INDICADOR PRINCIPAL DE RETRASOS (Botón) ---
         indicador_retrasos = ft.Container(
             content=ft.Row([
-                ft.Icon(ft.Icons.ALARM, color=ft.Colors.WHITE, size=20), # Icono de alarma
+                ft.Icon(ft.Icons.ALARM, color=ft.Colors.WHITE, size=20),
                 ft.Text("Retrasos", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD)
             ], alignment=ft.MainAxisAlignment.CENTER, spacing=5),
-            bgcolor=self.ACCENT, # Usar color naranja (ACCENT) para el indicador
+            bgcolor=self.ACCENT,
             padding=5,
             border_radius=5,
             width=120,
             height=30,
-            visible=False, # Inicialmente oculto, se controla en actualizar_ui_completo
-            ink=True, # Para efecto de click
-            on_click=self.toggle_detalle_retrasos # Asociar la función de toggle
+            visible=False,
+            ink=True,
+            on_click=self.toggle_detalle_retrasos
         )
-        # --- FIN INDICADOR DE RETRASOS ---
 
-        # --- PANEL DESPLEGABLE DE DETALLES DE STOCK ---
         panel_detalle_stock = ft.Container(
             content=ft.Column([
                 ft.Text("Ingredientes con bajo stock:", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
-                # Este ListView se llenará dinámicamente
-                ft.ListView(
-                    controls=[],
-                    spacing=2,
-                    padding=5,
-                    height=100, # Altura fija para el panel
-                    width=200,  # Ancho fijo para el panel
-                    auto_scroll=False,
-                    # bgcolor=ft.Colors.RED_900,  # <-- ❌ ESTE ARGUMENTO NO ES VÁLIDO EN ListView
-                    # border_radius=5,            # <-- ❌ ESTE ARGUMENTO TAMPOCO ES VÁLIDO EN ListView
-                )
+                ft.ListView(controls=[], spacing=2, padding=5, height=100, width=200, auto_scroll=False)
             ], spacing=5),
-            bgcolor=self.CARD_BG,  # Usar color base de carta
+            bgcolor=self.CARD_BG,
             padding=10,
             border_radius=5,
-            visible=False, # Inicialmente oculto, se controla en actualizar_visibilidad_alerta
-            width=220, # Ancho del panel
-            # No usar ink=True aquí, solo el botón principal debe ser clickeable
+            visible=False,
+            width=220,
         )
-        # --- FIN PANEL DESPLEGABLE DE DETALLES DE STOCK ---
 
-        # --- PANEL DESPLEGABLE DE DETALLES DE RETRASOS ---
         panel_detalle_retrasos = ft.Container(
             content=ft.Column([
                 ft.Text("Pedidos con retraso:", size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
-                # Este ListView se llenará dinámicamente
-                ft.ListView(
-                    controls=[],
-                    spacing=2,
-                    padding=5,
-                    height=100, # Altura fija para el panel
-                    width=200,  # Ancho fijo para el panel
-                    auto_scroll=False,
-                    # bgcolor=ft.Colors.ORANGE_900,  # <-- ❌ ESTE ARGUMENTO NO ES VÁLIDO EN ListView
-                    # border_radius=5,            # <-- ❌ ESTE ARGUMENTO TAMPOCO ES VÁLIDO EN ListView
-                )
+                ft.ListView(controls=[], spacing=2, padding=5, height=100, width=200, auto_scroll=False)
             ], spacing=5),
-            bgcolor=self.CARD_BG,  # Usar color base de carta
+            bgcolor=self.CARD_BG,
             padding=10,
             border_radius=5,
-            visible=False, # Inicialmente oculto, se controla en actualizar_visibilidad_alerta
-            width=220, # Ancho del panel
-            # No usar ink=True aquí, solo el botón principal debe ser clickeable
+            visible=False,
+            width=220,
         )
-        # --- FIN PANEL DESPLEGABLE DE DETALLES DE RETRASOS ---
 
+        # === RELOJ EN VIVO ===
         def actualizar_reloj():
             reloj.value = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             page.update()
@@ -1407,182 +1391,111 @@ class RestauranteGUI:
 
         hilo_reloj = threading.Thread(target=loop_reloj, daemon=True)
         hilo_reloj.start()
+        log.info("Hilo del reloj en vivo iniciado")
 
+        # === CARGA INICIAL DEL MENÚ ===
         try:
             self.menu_cache = self.backend_service.obtener_menu()
+            log.info(f"Menú cargado desde backend → {len(self.menu_cache)} ítems")
         except Exception as e:
-            print(f"Error al cargar menú: {e}")
+            log.error(f"Error al cargar menú al iniciar: {e}")
             self.menu_cache = []
 
+        # === CREACIÓN DE TODAS LAS VISTAS ===
+        log.debug("Creando todas las vistas de la aplicación")
         self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
-        # --- PASAR LOS COLORES DEL TEMA PRINCIPAL ---
         self.panel_gestion = crear_panel_gestion(
-            self.backend_service,
-            self.menu_cache,
-            self.actualizar_ui_completo,
-            page,
-            self.PRIMARY,       # Pasar PRIMARY desde RestauranteGUI
-            self.PRIMARY_DARK   # Pasar PRIMARY_DARK desde RestauranteGUI
+            self.backend_service, self.menu_cache, self.actualizar_ui_completo,
+            page, self.PRIMARY, self.PRIMARY_DARK
         )
-        # --- FIN PASAR LOS COLORES ---
         self.vista_cocina = crear_vista_cocina(self.backend_service, self.actualizar_ui_completo, page)
-        # self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- COMENTAR ESTA LINEA (ANTIGUA)
-        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page) # <-- USAR LA NUEVA VISTA DE caja_view.py
+        self.vista_caja = crear_vista_caja(self.backend_service, self.actualizar_ui_completo, page)
         self.vista_admin = crear_vista_admin(self.backend_service, self.menu_cache, self.actualizar_ui_completo, page)
-        # --- AÑADIR ESTA LINEA ---
         self.vista_recetas = crear_vista_recetas(
-            self.recetas_service,      # Servicio de recetas
-            self.backend_service,      # Para obtener menú (platos)
-            self.inventory_service,    # Para obtener ingredientes
-            self.actualizar_ui_completo,
-            page
+            self.recetas_service, self.backend_service, self.inventory_service,
+            self.actualizar_ui_completo, page
         )
-        # --- FIN AÑADIR ESTA LINEA ---
-        # self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page) # <-- COMENTAR ESTA LINEA
-        self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page) # <-- QUITAR 'self'
+        self.vista_inventario = crear_vista_inventario(self.inventory_service, self.actualizar_ui_completo, page)
         self.vista_configuraciones = crear_vista_configuraciones(
-            self.config_service,
-            self.inventory_service,
-            self.backend_service, # ✅ AÑADIDO: Pasar backend_service
-            self.actualizar_ui_completo,
-            page
+            self.config_service, self.inventory_service, self.backend_service,
+            self.actualizar_ui_completo, page
         )
         self.vista_reportes = crear_vista_reportes(self.backend_service, self.actualizar_ui_completo, page)
-        self.vista_reservas = crear_vista_reservas(self.reservas_service, self.backend_service, self.backend_service, self.actualizar_ui_completo, page) # Pasar servicios necesarios
-        # --- CREAR Y ASIGNAR LA VISTA DE PERSONALIZACIÓN ---
-        self.vista_personalizacion = crear_vista_personalizacion(self) # <-- Crear la vista y pasar la instancia de la app
-        # --- FIN CREAR Y ASIGNAR LA VISTA DE PERSONALIZACIÓN ---
-        self.vista_bienvenida = crear_vista_bienvenida(self.backend_service, self.actualizar_ui_completo, page)
+        self.vista_reservas = crear_vista_reservas(
+            self.reservas_service, self.backend_service, self.backend_service,
+            self.actualizar_ui_completo, page
+        )
+        self.vista_personalizacion = crear_vista_personalizacion(self)
 
+        log.info("Todas las vistas creadas correctamente - Aplicación lista")
+
+        
         tabs = ft.Tabs(
             selected_index=0,
             animation_duration=300,
             tabs=[
-                ft.Tab(
-                    text="Mesera",
-                    icon=ft.Icons.PERSON,
-                    content=self.crear_vista_mesera()
-                ),
-                ft.Tab(
-                    text="Cocina",
-                    icon=ft.Icons.RESTAURANT,
-                    content=self.vista_cocina
-                ),
-                ft.Tab(
-                    text="Caja",
-                    icon=ft.Icons.POINT_OF_SALE,
-                    content=self.vista_caja # <-- USAR LA NUEVA VISTA
-                ),
-                ft.Tab(
-                    text="Administracion",
-                    icon=ft.Icons.ADMIN_PANEL_SETTINGS,
-                    content=self.vista_admin
-                ),
-                ft.Tab(
-                    text="Inventario",
-                    icon=ft.Icons.INVENTORY_2,
-                    content=self.vista_inventario
-                ),
-                # --- AÑADIR ESTA PESTAÑA ---
-                ft.Tab(
-                    text="Recetas",
-                    icon=ft.Icons.BOOKMARK_BORDER, # Elige un icono adecuado
-                    content=self.vista_recetas
-                ),
-                # --- FIN AÑADIR ESTA PESTAÑA ---
-                ft.Tab(
-                    text="Configuraciones",
-                    icon=ft.Icons.SETTINGS,
-                    content=self.vista_configuraciones
-                ),
-                # --- AÑADIR ESTA PESTAÑA ---
-                ft.Tab(
-                    text="Personalización", # Nombre de la nueva pestaña
-                    icon=ft.Icons.TUNE, # Icono para personalización
-                    content=self.vista_personalizacion # Contenido de la nueva vista
-                ),
-                # --- FIN AÑADIR ESTA PESTAÑA ---
-                ft.Tab(
-                    text="Reservas",
-                    icon=ft.Icons.CALENDAR_TODAY, # Icono para reservas
-                    content=self.vista_reservas
-                ),
-                ft.Tab(
-                    text="Reportes",
-                    icon=ft.Icons.ANALYTICS,
-                    content=self.vista_reportes
-                ),
-                ft.Tab(
-                    text="Bienvenida / Config",
-                    icon=ft.Icons.HOME,
-                    content=self.vista_bienvenida
-                ),
+                ft.Tab(text="Mesera", icon=ft.Icons.PERSON, content=self.crear_vista_mesera()),
+                ft.Tab(text="Cocina", icon=ft.Icons.RESTAURANT, content=self.vista_cocina),
+                ft.Tab(text="Caja", icon=ft.Icons.POINT_OF_SALE, content=self.vista_caja),
+                ft.Tab(text="Administracion", icon=ft.Icons.ADMIN_PANEL_SETTINGS, content=self.vista_admin),
+                ft.Tab(text="Inventario", icon=ft.Icons.INVENTORY_2, content=self.vista_inventario),
+                ft.Tab(text="Recetas", icon=ft.Icons.BOOKMARK_BORDER, content=self.vista_recetas),
+                ft.Tab(text="Configuraciones", icon=ft.Icons.SETTINGS, content=self.vista_configuraciones),
+                ft.Tab(text="Personalización", icon=ft.Icons.TUNE, content=self.vista_personalizacion),
+                ft.Tab(text="Reservas", icon=ft.Icons.CALENDAR_TODAY, content=self.vista_reservas),
+                ft.Tab(text="Reportes", icon=ft.Icons.ANALYTICS, content=self.vista_reportes),
             ],
             expand=1
         )
+        log.info("Pestañas principales creadas - 10 módulos activos")
 
-        # Actualizar visibilidad del indicador y detalle en cada actualización de UI
         def actualizar_visibilidad_alerta():
-            # Actualizar visibilidad del indicador principal de stock
+            # Stock bajo
             indicador_stock_bajo.visible = self.hay_stock_bajo
-            # Actualizar visibilidad del panel de detalle de stock
             panel_detalle_stock.visible = self.hay_stock_bajo and self.mostrar_detalle_stock
-            # Actualizar contenido del ListView dentro del panel de detalle de stock
-            lista_detalle_stock = panel_detalle_stock.content.controls[1] # El ListView
+            lista_detalle_stock = panel_detalle_stock.content.controls[1]
             lista_detalle_stock.controls.clear()
             if self.hay_stock_bajo:
-                for ingrediente in self.ingredientes_bajos_lista:
-                    lista_detalle_stock.controls.append(
-                        ft.Text(f"- {ingrediente}", size=12, color=ft.Colors.WHITE)
-                    )
+                for ing in self.ingredientes_bajos_lista:
+                    lista_detalle_stock.controls.append(ft.Text(f"- {ing}", size=12, color=ft.Colors.WHITE))
+                log.debug(f"Indicador Stock Bajo activado → {len(self.ingredientes_bajos_lista)} ingredientes")
 
-            # Actualizar visibilidad del indicador principal de retrasos
+            # Retrasos
             indicador_retrasos.visible = self.hay_pedidos_atrasados
-            # Actualizar visibilidad del panel de detalle de retrasos
             panel_detalle_retrasos.visible = self.hay_pedidos_atrasados and self.mostrar_detalle_retrasos
-            # Actualizar contenido del ListView dentro del panel de detalle de retrasos
-            lista_detalle_retrasos = panel_detalle_retrasos.content.controls[1] # El ListView
+            lista_detalle_retrasos = panel_detalle_retrasos.content.controls[1]
             lista_detalle_retrasos.controls.clear()
             if self.hay_pedidos_atrasados:
                 for alerta in self.lista_alertas_retrasos:
                     lista_detalle_retrasos.controls.append(
                         ft.Text(f"- {alerta['titulo_pedido']} ({alerta['tiempo_retraso']} min)", size=12, color=ft.Colors.WHITE)
                     )
+                log.debug(f"Indicador Retrasos activado → {len(self.lista_alertas_retrasos)} pedidos atrasados")
 
             page.update()
 
-        # Agregar al Stack, ahora con el panel de detalle y el indicador de retrasos
         page.add(
             ft.Stack(
                 controls=[
                     tabs,
-                    # --- AÑADIR INDICADORES AL STACK (en la esquina superior derecha) ---
                     ft.Container(
                         content=ft.Column([
-                            ft.Row([ # Contenedor para ambos indicadores en una fila
+                            ft.Row([
                                 indicador_stock_bajo,
-                                ft.Text("   ", width=10), # Espaciado entre indicadores
-                                indicador_retrasos, # Indicador de retrasos
-                            ], alignment=ft.MainAxisAlignment.START), # Alinear al inicio
-                            # Añadir los paneles de detalle justo debajo de los indicadores
+                                ft.Text("   ", width=10),
+                                indicador_retrasos,
+                            ], alignment=ft.MainAxisAlignment.START),
                             ft.Container(
-                                content=ft.Column([
-                                    panel_detalle_stock,
-                                    panel_detalle_retrasos
-                                ]),
-                                # No usar top/right aquí para el panel, se posiciona relativo al botón
-                                # Mejor: Usar coordenadas relativas al Stack
-                                # La forma más simple es dejarlo aquí y que actualizar_visibilidad_alerta lo maneje
+                                content=ft.Column([panel_detalle_stock, panel_detalle_retrasos])
                             )
-                        ], spacing=5), # Espacio entre el botón y el panel
-                        top=10,  # Posición desde arriba para el contenedor padre (botones)
-                        right=10, # Posición desde la derecha para el contenedor padre (botones)
+                        ], spacing=5),
+                        top=10,
+                        right=10,
                     ),
-                    # --- FIN AÑADIR INDICADORES ---
                     ft.Container(
                         content=reloj,
-                        right=20,   # <-- AÑADIR ESTA LÍNEA: 20px desde la derecha
-                        bottom=50,  # <-- MANTENER ESTA LÍNEA: 50px desde la parte inferior
+                        right=20,
+                        bottom=50,
                         padding=10,
                         bgcolor=ft.Colors.BLUE_GREY_900,
                         border_radius=8,
@@ -1591,16 +1504,19 @@ class RestauranteGUI:
                 expand=True
             )
         )
+        log.info("Interfaz gráfica principal renderizada - Stack con pestañas y alertas")
 
-        # ✅ INICIAR SINCRONIZACIÓN AUTOMÁTICA
+        # INICIAR TODO
         self.iniciar_sincronizacion()
         self.actualizar_ui_completo()
-        # Llamar una vez inicialmente para reflejar el estado inicial
         actualizar_visibilidad_alerta()
-        # Vincular la función de actualización de visibilidad a la clase para usarla en actualizar_ui_completo
         self.actualizar_visibilidad_alerta = actualizar_visibilidad_alerta
 
+        log.info("¡APLICACIÓN RESTIA INICIADA CORRECTAMENTE! - Todo listo y funcionando")
+        log.info("=" * 60)
+
     def crear_vista_mesera(self):
+        log.debug("Creando vista Mesera")
         return ft.Container(
             content=ft.Row(
                 controls=[
@@ -1624,92 +1540,79 @@ class RestauranteGUI:
         )
 
     def seleccionar_mesa(self, numero_mesa: int):
+        log.info(f"Usuario seleccionó Mesa {numero_mesa}")
         if self.panel_gestion:
             self.panel_gestion.seleccionar_mesa(numero_mesa)
 
-    def actualizar_ui_completo(self):
+    def actualizar_ui_completo(self): 
+        log.debug("↻ actualizar_ui_completo() llamado - Iniciando refresco completo de UI")
         nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
         self.mesas_grid.controls = nuevo_grid.controls
         self.mesas_grid.update()
+        log.debug("Grid de mesas recreado y actualizado")
+
         if hasattr(self.vista_cocina, 'actualizar'):
             self.vista_cocina.actualizar()
-        # if hasattr(self.vista_caja, 'actualizar'): # <-- COMENTAR ESTA LINEA (ANTIGUA, si existe)
-        #     self.vista_caja.actualizar()
-        if hasattr(self.vista_caja, 'actualizar'): # <-- USAR EL METODO DE LA NUEVA VISTA
+            log.debug("Vista Cocina actualizada")
+
+        if hasattr(self.vista_caja, 'actualizar'):
             self.vista_caja.actualizar()
+            log.debug("Vista Caja actualizada")
+
         if hasattr(self.vista_admin, 'actualizar_lista_clientes'):
             self.vista_admin.actualizar_lista_clientes()
-        # --- AÑADIR ESTA LÍNEA ---
+            log.debug("Lista de clientes en Administración actualizada")
+
         if hasattr(self.vista_recetas, 'actualizar_datos'):
             self.vista_recetas.actualizar_datos()
-        # --- FIN AÑADIR ESTA LÍNEA ---
+            log.debug("Vista Recetas actualizada")
+
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
+            log.debug("Lista de inventario actualizada")
+
         if hasattr(self, 'actualizar_visibilidad_alerta'):
             self.actualizar_visibilidad_alerta()
-        # --- FIN ACTUALIZAR VISIBILIDAD ---
-
-        # --- UPDATE: Recargar menú si es necesario y propagar ---
-        self.recargar_menu()
-        if hasattr(self.panel_gestion, 'actualizar_menu'):
-            self.panel_gestion.actualizar_menu(self.menu_cache)
-        if hasattr(self.vista_admin, 'actualizar_menu'):
-            self.vista_admin.actualizar_menu(self.menu_cache)
-        
-        # --- MOSTRAR ALERTAS DE RETRASOS ---
-        # Esta lógica ya se maneja en actualizar_visibilidad_alerta
-        # No es necesario hacer nada adicional aquí
-        # --- FIN MOSTRAR ALERTAS DE RETRASOS ---
+            log.debug("Visibilidad de alertas de stock y retrasos actualizada")
 
         self.page.update()
-        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'): # O un método de actualización si lo defines
-    # self.vista_reservas.cargar_clientes_mesas() # Si necesitas recargar datos específicos
-            pass # Opcional, dependiendo de la lógica de la vista de reservas
+        log.debug("page.update() ejecutado - UI refrescada completamente")
+
+        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'):
+            pass  # Aquí puedes descomentar cuando lo implementes
+            # self.vista_reservas.cargar_clientes_mesas()
+            log.debug("Vista Reservas lista para actualizar (método disponible)")
+
+        log.info("✓ Actualización completa de UI finalizada con éxito")
 
     # --- FUNCIÓN: actualizar_lista_inventario ---
-    # Actualiza la lista de inventario solo si no hay campo en edición.
     def actualizar_lista_inventario(self):
         """Llama a actualizar_lista de la vista de inventario solo si no hay campo en edición."""
+        log.debug("actualizar_lista_inventario() llamado")
         if hasattr(self.vista_inventario, 'campo_en_edicion_id') and hasattr(self.vista_inventario, 'actualizar_lista'):
-            # Verificar si hay un campo en edición en la vista de inventario
             if getattr(self.vista_inventario, 'campo_en_edicion_id', None) is not None:
+                log.info("Actualización de inventario omitida: hay un campo en edición activa")
                 print("Hay un campo en edición en la vista de inventario, se omite la actualización.")
-                return # Salir sin actualizar la lista
-        # Si no hay campo en edición o no se puede verificar, llamar a actualizar_lista
+                return
         if hasattr(self.vista_inventario, 'actualizar_lista'):
             self.vista_inventario.actualizar_lista()
+            log.debug("Lista de inventario forzada a actualizar (sin edición activa)")
 
     # --- NUEVA FUNCIÓN: toggle_detalle_stock_bajo ---
-    # Alterna la visibilidad del detalle de ingredientes bajos.
     def toggle_detalle_stock_bajo(self, e):
         """Alterna la visibilidad del panel de detalles de stock bajo."""
         self.mostrar_detalle_stock = not self.mostrar_detalle_stock
-        print(f"Detalle stock bajo mostrado: {self.mostrar_detalle_stock}") # Mensaje de depuración
-        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
-        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
+        log.info(f"Detalle de stock bajo {'MOSTRADO' if self.mostrar_detalle_stock else 'OCULTADO'} por el usuario")
+        self.actualizar_ui_completo()
 
+    # --- NUEVA FUNCIÓN: toggle_detalle_retrasos ---
     def toggle_detalle_retrasos(self, e):
         """Alterna la visibilidad del panel de detalles de pedidos retrasados."""
         self.mostrar_detalle_retrasos = not self.mostrar_detalle_retrasos
-        print(f"Detalle retrasos mostrado: {self.mostrar_detalle_retrasos}") # Mensaje de depuración
-        # Llamar a actualizar_ui_completo para que refleje el cambio de visibilidad
-        self.actualizar_ui_completo() # <-- Opción que asegura actualización general
-    # --- FIN NUEVA FUNCIÓN ---
-
-    # --- UPDATE: Método para recargar el menú desde el backend ---
-    def recargar_menu(self):
-        try:
-            # Obtener menú actualizado
-            menu_actual = self.backend_service.obtener_menu()
-            # Comparar len o hash simple para ver si cambió algo y evitar updates innecesarios 
-            # (opcional, por ahora lo forzamos para asegurar consistencia)
-            self.menu_cache = menu_actual
-        except Exception as e:
-            print(f"Error recargando menú: {e}")
-    # --- FIN UPDATE ---
+        log.info(f"Detalle de retrasos {'MOSTRADO' if self.mostrar_detalle_retrasos else 'OCULTADO'} por el usuario")
+        self.actualizar_ui_completo()
 
 # === FUNCIÓN: crear_vista_personalizacion ===
-# Crea la vista para personalizar umbrales de alerta.
 def crear_vista_personalizacion(app_instance):
     """
     Crea la vista de personalización para umbrales de alerta.
@@ -1718,79 +1621,75 @@ def crear_vista_personalizacion(app_instance):
     Returns:
         ft.Container: Contenedor con la interfaz de personalización.
     """
-    # Campos para ingresar los nuevos umbrales
+    log.debug("Creando vista de Personalización de Alertas")
+
     tiempo_umbral_input = ft.TextField(
         label="Tiempo umbral para pedidos (minutos)",
-        value=str(app_instance.tiempo_umbral_minutos), # Mostrar valor actual
+        value=str(app_instance.tiempo_umbral_minutos),
         width=300,
-        input_filter=ft.NumbersOnlyInputFilter(), # Solo números
+        input_filter=ft.NumbersOnlyInputFilter(),
         hint_text="Ej: 20"
     )
     stock_umbral_input = ft.TextField(
         label="Cantidad umbral para stock bajo",
-        value=str(app_instance.umbral_stock_bajo), # Mostrar valor actual
+        value=str(app_instance.umbral_stock_bajo),
         width=300,
-        input_filter=ft.NumbersOnlyInputFilter(), # Solo números
+        input_filter=ft.NumbersOnlyInputFilter(),
         hint_text="Ej: 5"
     )
 
     def guardar_configuracion_click(e):
         """Guarda los nuevos umbrales ingresados."""
+        log.info("Usuario hizo clic en 'Guardar Configuración' en Personalización")
         try:
             nuevo_tiempo_umbral = int(tiempo_umbral_input.value)
             nuevo_stock_umbral = int(stock_umbral_input.value)
 
             if nuevo_tiempo_umbral <= 0 or nuevo_stock_umbral < 0:
-                print("Los umbrales deben ser números positivos (tiempo) o cero/negativos (stock).")
-                # Opcional: Mostrar una alerta en la UI
+                log.warning(f"Intento de guardar umbrales inválidos → Tiempo: {nuevo_tiempo_umbral} | Stock: {nuevo_stock_umbral}")
                 def cerrar_alerta(e):
                     app_instance.page.close(dlg_error)
                 
                 dlg_error = ft.AlertDialog(
                     title=ft.Text("Error"),
-                    content=ft.Text("Los umbrales deben ser números positivos (tiempo) o cero/negativos (stock)."),
+                    content=ft.Text("Los umbrales deben ser números positivos (tiempo > 0, stock ≥ 0)."),
                     actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta)],
-                    actions_alignment=ft.MainAxisAlignment.END,
                 )
                 app_instance.page.dialog = dlg_error
                 dlg_error.open = True
                 app_instance.page.update()
                 return
 
-            # Actualizar los valores en la instancia de la aplicación
+            viejo_tiempo = app_instance.tiempo_umbral_minutos
+            viejo_stock = app_instance.umbral_stock_bajo
+
             app_instance.tiempo_umbral_minutos = nuevo_tiempo_umbral
             app_instance.umbral_stock_bajo = nuevo_stock_umbral
-
-            # Guardar la configuración en el archivo
             app_instance.guardar_configuracion()
 
-            print(f"Configuración actualizada: Tiempo umbral: {nuevo_tiempo_umbral} min, Stock umbral: {nuevo_stock_umbral}")
+            log.info(f"CONFIGURACIÓN ACTUALIZADA → Tiempo: {viejo_tiempo}→{nuevo_tiempo_umbral} min | Stock: {viejo_stock}→{nuevo_stock_umbral}")
 
-            # Opcional: Mostrar mensaje de éxito
             def cerrar_alerta_ok(e):
                 app_instance.page.close(dlg_success)
             
             dlg_success = ft.AlertDialog(
-                title=ft.Text("Éxito"),
-                content=ft.Text("Configuración guardada correctamente."),
+                title=ft.Text("¡Éxito!", color=ft.Colors.GREEN),
+                content=ft.Text("Configuración guardada correctamente.", color=ft.Colors.GREEN_200),
                 actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta_ok)],
-                actions_alignment=ft.MainAxisAlignment.END,
             )
             app_instance.page.dialog = dlg_success
             dlg_success.open = True
             app_instance.page.update()
 
-        except ValueError:
-            print("Por favor, ingrese valores numéricos válidos.")
-            # Opcional: Mostrar una alerta en la UI
+        except ValueError as ve:
+            log.error(f"Error de conversión en personalización: {tiempo_umbral_input.value} | {stock_umbral_input.value}")
             def cerrar_alerta_val(e):
                 app_instance.page.close(dlg_error_val)
             
             dlg_error_val = ft.AlertDialog(
                 title=ft.Text("Error"),
-                content=ft.Text("Por favor, ingrese valores numéricos válidos."),
+                content=ft.Text("Por favor, ingrese solo números enteros."),
                 actions=[ft.TextButton("Aceptar", on_click=cerrar_alerta_val)],
-                actions_alignment=ft.MainAxisAlignment.END,
             )
             app_instance.page.dialog = dlg_error_val
             dlg_error_val.open = True
@@ -1813,12 +1712,16 @@ def crear_vista_personalizacion(app_instance):
         padding=20,
         expand=True
     )
-
+    log.info("Vista de Personalización creada y lista")
     return vista
 
+
 def main():
+    log.info("Iniciando aplicación RestIA - Llamando a ft.app()")
     app = RestauranteGUI()
     ft.app(target=app.main)
 
+
 if __name__ == "__main__":
+    log.info("Ejecución directa detectada (__main__) - Arrancando RestIA")
     main()
