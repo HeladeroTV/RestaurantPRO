@@ -7,5 +7,9 @@ uvicorn[standard]==0.23.2   # ASGI server for FastAPI
 flet==0.28.3                # UI framework used in app.py / inventario_view.py
 requests==2.31.0            # HTTP client for service calls
 psycopg2-binary==2.9.9      # PostgreSQL driver (binary build for easier local install)
+colorlog
+pandas
+kaleido
+reportlab
+numpy
 
-# (Optional) add a production-grade process manager later, e.g. 'gunicorn' with 'uvicorn.workers.UvicornWorker'

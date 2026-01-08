@@ -1,308 +1,236 @@
+# bienvenida_view.py
 import flet as ft
-from typing import List, Dict, Any
+from pathlib import Path
 
-def crear_vista_bienvenida(backend_service, on_update_ui, page):
-    # --- PESTAÑA 1: MENÚ Y CATEGORÍAS ---
-    
-    # Variables de estado
-    categorias_disponibles = []
-    items_categoria_seleccionada = []
-    
-    # Controles de UI para Categorías
-    nueva_categoria_input = ft.TextField(label="Nombre Categoria (Ej: Entradas)", width=300)
-    categoria_dropdown = ft.Dropdown(
-        label="Seleccionar Categoría",
-        width=300,
-    )
-    
-    # Controles de UI para Ítems
-    nombre_item_input = ft.TextField(label="Nombre del Platillo", width=250)
-    precio_item_input = ft.TextField(
-        label="Precio", 
-        width=150,
-        input_filter=ft.NumbersOnlyInputFilter(),
-        prefix_text="$"
-    )
-    lista_items_container = ft.Column(spacing=5, scroll=ft.ScrollMode.AUTO, height=300)
+class BienvenidaConfiguracion:
+    def __init__(self, app_instance, page):
+        self.app = app_instance
+        self.page = page
+        self.mesas = []
+        self.categorias = []  # Lista de dicts: {"nombre": "Bebidas", "platillos": []}
+        self.vista = self.crear_vista()
 
-    def cargar_datos_menu():
-        try:
-            menu = backend_service.obtener_menu()
-            nonlocal categorias_disponibles
-            # Extraer categorías únicas
-            categorias_disponibles = sorted(list(set(item["tipo"] for item in menu)))
-            
-            # Actualizar dropdown
-            categoria_dropdown.options = [ft.dropdown.Option(c) for c in categorias_disponibles]
-            if not categoria_dropdown.value and categorias_disponibles:
-                categoria_dropdown.value = categorias_disponibles[0]
-            
-            actualizar_lista_items()
-            page.update()
-        except Exception as e:
-            print(f"Error cargando menú: {e}")
-
-    def actualizar_lista_items():
-        categoria = categoria_dropdown.value
-        if not categoria:
-            lista_items_container.controls.clear()
-            return
-
-        try:
-            menu = backend_service.obtener_menu()
-            items = [item for item in menu if item["tipo"] == categoria]
-            
-            lista_items_container.controls.clear()
-            for item in items:
-                row = ft.Container(
-                    content=ft.Row([
-                        ft.Text(f"{item['nombre']}", expand=True),
-                        ft.Text(f"${item['precio']:.2f}", weight=ft.FontWeight.BOLD),
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINE, 
-                            icon_color=ft.Colors.RED_400,
-                            tooltip="Eliminar platillo",
-                            on_click=lambda e, nome=item['nombre'], tipo=categoria: eliminar_item_click(nome, tipo)
+    def crear_vista(self):
+        # === PASO 1: MESAS ===
+        lista_mesas = ft.Column(scroll="auto", height=250)
+        
+        def agregar_mesa(e):
+            try:
+                num = int(txt_numero.value)
+                cap = int(txt_capacidad.value)
+                if num > 0 and cap > 0 and num not in [m["numero"] for m in self.mesas]:
+                    self.mesas.append({"numero": num, "capacidad": cap})
+                    lista_mesas.controls.append(
+                        ft.ListTile(
+                            title=ft.Text(f"Mesa {num}"),
+                            subtitle=ft.Text(f"Capacidad: {cap} personas"),
+                            trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda e, n=num: eliminar_mesa(n))
                         )
-                    ]),
-                    bgcolor=ft.Colors.BLUE_GREY_900,
-                    padding=10,
-                    border_radius=5
-                )
-                lista_items_container.controls.append(row)
-            
-            page.update()
-        except Exception as e:
-            print(f"Error actualizando lista items: {e}")
-
-    def agregar_categoria_click(e):
-        nueva = nueva_categoria_input.value
-        if not nueva: return
-        
-        # En realidad, una categoría "existe" cuando tiene al menos un item.
-        # Pero podemos simular crearla añadiendo un item placeholder o simplemente validando.
-        # Para simplificar, añadiremos directamente el primer item a esa nueva categoría.
-        # O permitimos añadir tipos al dropdown.
-        
-        # Estrategia: Añadir al dropdown localmente. Se guardará en DB cuando se añada un item de ese tipo.
-        if nueva not in categorias_disponibles:
-            categorias_disponibles.append(nueva)
-            categoria_dropdown.options.append(ft.dropdown.Option(nueva))
-            categoria_dropdown.value = nueva
-            nueva_categoria_input.value = ""
-            actualizar_lista_items()
-            page.update()
-
-    def agregar_item_click(e):
-        nombre = nombre_item_input.value
-        precio_str = precio_item_input.value
-        categoria = categoria_dropdown.value
-        
-        if not nombre or not precio_str or not categoria:
-            # Mostrar error
-            page.snack_bar = ft.SnackBar(ft.Text("Todos los campos son obligatorios"), bgcolor=ft.Colors.RED_700)
-            page.snack_bar.open = True
-            page.update()
-            return
-            
-        try:
-            precio = float(precio_str)
-            backend_service.agregar_item_menu(nombre, precio, categoria)
-            
-            nombre_item_input.value = ""
-            precio_item_input.value = ""
-            
-            cargar_datos_menu() # Recargar todo
-            page.snack_bar = ft.SnackBar(ft.Text("Platillo agregado"), bgcolor=ft.Colors.GREEN_700)
-            page.snack_bar.open = True
-            page.update()
-            
-        except Exception as ex:
-            print(f"Error agregando item: {ex}")
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error: {ex}"), bgcolor=ft.Colors.RED_700)
-            page.snack_bar.open = True
-            page.update()
-
-    def eliminar_item_click(nombre, tipo):
-        try:
-            backend_service.eliminar_item_menu(nombre, tipo)
-            cargar_datos_menu()
-        except Exception as ex:
-            print(f"Error eliminando item: {ex}")
-
-    categoria_dropdown.on_change = lambda e: actualizar_lista_items()
-
-    tab_menu = ft.Container(
-        content=ft.Column([
-            ft.Text("Gestión de Menú y Categorías", size=20, weight=ft.FontWeight.BOLD),
-            ft.Text("1. Selecciona o crea una categoría.", size=14, color=ft.Colors.GREY_400),
-            ft.Row([
-                categoria_dropdown,
-                ft.Text("O crear nueva:", size=14),
-                nueva_categoria_input,
-                ft.ElevatedButton("Crear", on_click=agregar_categoria_click)
-            ], alignment=ft.MainAxisAlignment.START, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            
-            ft.Divider(),
-            
-            ft.Text("2. Agregar Platillos a la categoría seleccionada.", size=14, color=ft.Colors.GREY_400),
-            ft.Row([
-                nombre_item_input,
-                precio_item_input,
-                ft.ElevatedButton("Agregar Platillo", on_click=agregar_item_click, bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-            ]),
-            
-            ft.Divider(),
-            
-            ft.Text("Platillos en esta categoría:", size=16, weight=ft.FontWeight.BOLD),
-            lista_items_container
-        ]),
-        padding=20
-    )
-
-
-    # --- PESTAÑA 2: CONFIGURACIÓN DE MESAS ---
-    
-    total_mesas_input = ft.TextField(
-        label="Número Total de Mesas", 
-        width=200, 
-        value="6",
-        input_filter=ft.NumbersOnlyInputFilter()
-    )
-    
-    config_mesas_container = ft.Column(scroll=ft.ScrollMode.AUTO, height=400)
-    mesas_inputs = [] # Lista de Refs o controles para leer valores despues
-
-    def generar_inputs_mesas(e):
-        try:
-            total = int(total_mesas_input.value)
-            config_mesas_container.controls.clear()
-            mesas_inputs.clear()
-            
-            for i in range(1, total + 1):
-                # Valor por defecto capaicdad: intentar mantener si ya existe, o 4
-                capacidad_defecto = "4"
-                if i <= 2: capacidad_defecto = "2" # Mesas pequeñas habituales
-                elif i >= 5: capacidad_defecto = "6" # Mesas grandes
-                
-                input_capacidad = ft.TextField(
-                    label=f"Capacidad Mesa {i}",
-                    value=capacidad_defecto,
-                    width=150,
-                    input_filter=ft.NumbersOnlyInputFilter()
-                )
-                mesas_inputs.append({"numero": i, "input": input_capacidad})
-                
-                fila = ft.Row([
-                    ft.Text(f"Mesa {i}:", weight=ft.FontWeight.BOLD, width=80),
-                    input_capacidad,
-                    ft.Text("personas")
-                ])
-                config_mesas_container.controls.append(fila)
-            
-            page.update()
-            
-        except ValueError:
-            pass
-
-    def guardar_configuracion_mesas(e):
-        config_data = []
-        try:
-            for item in mesas_inputs:
-                numero = item["numero"]
-                capacidad_str = item["input"].value
-                if not capacidad_str:
-                    capacidad = 4 # Default fallback
-                else:
-                    capacidad = int(capacidad_str)
-                
-                config_data.append({"numero": numero, "capacidad": capacidad})
-            
-            # Llamar al backend
-            backend_service.configurar_mesas(config_data)
-            
-            page.snack_bar = ft.SnackBar(ft.Text("Configuración de mesas guardada exitosamente."), bgcolor=ft.Colors.GREEN_700)
-            page.snack_bar.open = True
-            
-            # Notificar para actualizar UI principal si es necesario
-            if on_update_ui:
-                on_update_ui()
-                
-            page.update()
-            
-        except Exception as ex:
-            print(f"Error guardando mesas: {ex}")
-            page.snack_bar = ft.SnackBar(ft.Text(f"Error al guardar: {ex}"), bgcolor=ft.Colors.RED_700)
-            page.snack_bar.open = True
-            page.update()
-
-    def cargar_mesas_existentes():
-        try:
-            mesas = backend_service.obtener_mesas()
-            # Filtrar mesa virtual y ordenar
-            mesas_reales = sorted([m for m in mesas if not m.get("es_virtual", False) and m["numero"] != 99], key=lambda x: x["numero"])
-            
-            if mesas_reales:
-                total_mesas_input.value = str(len(mesas_reales))
-                config_mesas_container.controls.clear()
-                mesas_inputs.clear()
-                
-                for m in mesas_reales:
-                    num = m["numero"]
-                    cap = m["capacidad"]
-                    
-                    input_capacidad = ft.TextField(
-                        label=f"Capacidad Mesa {num}",
-                        value=str(cap),
-                        width=150,
-                        input_filter=ft.NumbersOnlyInputFilter()
                     )
-                    mesas_inputs.append({"numero": num, "input": input_capacidad})
-                    
-                    fila = ft.Row([
-                        ft.Text(f"Mesa {num}:", weight=ft.FontWeight.BOLD, width=80),
-                        input_capacidad,
-                        ft.Text("personas")
-                    ])
-                    config_mesas_container.controls.append(fila)
-                page.update()
-            else:
-                generar_inputs_mesas(None)
+                    txt_numero.value = ""
+                    txt_capacidad.value = ""
+                    self.page.update()
+            except: pass
+        
+        def eliminar_mesa(numero):
+            self.mesas = [m for m in self.mesas if m["numero"] != numero]
+            self.actualizar_lista_mesas(lista_mesas)
+        
+        txt_numero = ft.TextField(label="Número de mesa", width=120)
+        txt_capacidad = ft.TextField(label="Capacidad", width=120, input_filter=ft.NumbersOnlyInputFilter())
+        
+        # === PASO 2: CATEGORÍAS Y PLATILLOS ===
+        lista_categorias = ft.Column(scroll="auto", height=400)
+        
+        txt_categoria = ft.TextField(label="Nueva categoría", width=300)
+        
+        def agregar_categoria(e):
+            cat = txt_categoria.value.strip()
+            if cat and cat not in [c["nombre"] for c in self.categorias]:
+                self.categorias.append({"nombre": cat, "platillos": []})
+                txt_categoria.value = ""
+                self.actualizar_lista_categorias(lista_categorias)
+        
+        def agregar_platillo(e, categoria_nombre):
+            nombre = e.control.parent.controls[0].value.strip()
+            precio = e.control.parent.controls[1].value.strip()
+            if nombre and precio:
+                try:
+                    precio_float = float(precio)
+                    for cat in self.categorias:
+                        if cat["nombre"] == categoria_nombre:
+                            cat["platillos"].append({"nombre": nombre, "precio": precio_float})
+                            e.control.parent.controls[0].value = ""
+                            e.control.parent.controls[1].value = ""
+                            self.actualizar_lista_categorias(lista_categorias)
+                            break
+                except: pass
+        
+        def eliminar_categoria(self, cat_nombre, lista):
+            self.categorias = [c for c in self.categorias if c["nombre"] != cat_nombre]
+            self.actualizar_lista_categorias(lista)
+        
+        # === FINALIZAR ===
+        def finalizar(e):
+            if not self.mesas:
+                self.mostrar_error("Debes agregar al menos una mesa")
+                return
+            if not self.categorias:
+                self.mostrar_error("Debes agregar al menos una categoría")
+                return
+            
+            try:
+                # Limpiar datos antiguos
+                self.app.backend_service._request("delete", "/mesas/limpiar_fisicas")
+                self.app.backend_service._request("delete", "/menu/todo")
+                
+                # Insertar mesas
+                for mesa in self.mesas:
+                    self.app.backend_service.crear_mesa(mesa["numero"], mesa["capacidad"])
+                
+                # Insertar menú
+                for cat in self.categorias:
+                    for platillo in cat["platillos"]:
+                        self.app.backend_service.agregar_item_menu(
+                            nombre=platillo["nombre"],
+                            precio=platillo["precio"],
+                            tipo=cat["nombre"]
+                        )
+                
+                # Marcar como configurado
+                carpeta = Path.home() / ".restaurantia" / "datos"
+                carpeta.mkdir(parents=True, exist_ok=True)
+                (carpeta / "PRIMERA_CONFIGURACION_COMPLETADA").write_text("SI")
+                
+                self.page.snack_bar = ft.SnackBar(ft.Text("¡Configuración completada! Bienvenido a RestIA"), bgcolor=ft.Colors.GREEN_700)
+                self.page.snack_bar.open = True
+                self.page.update()
+                
+                # RECARGAR SISTEMA
+                self.app.actualizar_ui_completo()
+                self.page.go("/")  # O recargar la app normal
+                
+            except Exception as ex:
+                self.mostrar_error(f"Error: {ex}")
+        
+        # === VISTA FINAL ===
+        return ft.View(
+            "/",
+            [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("¡Bienvenido a RestIA!", size=36, weight=ft.FontWeight.BOLD, text_align="center"),
+                        ft.Text("Configuración inicial del sistema", size=20, text_align="center"),
+                        ft.Divider(height=40),
+                        
+                        ft.Text("1. Configura tus mesas", size=22, weight=ft.FontWeight.BOLD),
+                        ft.Row([txt_numero, txt_capacidad, ft.ElevatedButton("Agregar", on_click=agregar_mesa)]),
+                        ft.Container(lista_mesas, bgcolor=ft.Colors.BLUE_GREY_900, padding=20, border_radius=10),
+                        
+                        ft.Divider(height=40),
+                        ft.Text("2. Configura categorías y platillos", size=22, weight=ft.FontWeight.BOLD),
+                        ft.Row([txt_categoria, ft.ElevatedButton("Agregar categoría", on_click=agregar_categoria)]),
+                        ft.Container(lista_categorias, bgcolor=ft.Colors.BLUE_GREY_900, padding=20, border_radius=10),
+                        
+                        ft.Divider(height=40),
+                        ft.ElevatedButton(
+                            "¡FINALIZAR Y EMPEZAR!",
+                            icon=ft.Icons.CHECK_CIRCLE_OUTLINE,
+                            height=60,
+                            style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700),
+                            on_click=finalizar
+                        )
+                    ], scroll="auto"),
+                    padding=40,
+                    expand=True
+                )
+            ]
+        )
+    
+    def actualizar_lista_mesas(self, lista):
+        lista.controls.clear()
+        for mesa in self.mesas:
+            lista.controls.append(
+                ft.ListTile(
+                    title=ft.Text(f"Mesa {mesa['numero']}"),
+                    subtitle=ft.Text(f"Capacidad: {mesa['capacidad']} personas"),
+                    trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda e, n=mesa['numero']: self.eliminar_mesa(n, lista))
+                )
+            )
+        self.page.update()
+    
+    def eliminar_mesa(self, numero, lista):
+        self.mesas = [m for m in self.mesas if m["numero"] != numero]
+        self.actualizar_lista_mesas(lista)
+    
+    def actualizar_lista_categorias(self, lista):
+        lista.controls.clear()
+        
+        def agregar_platillo_local(e, categoria_nombre):
+            # Buscar los TextField en el Row del botón
+            row = e.control.parent
+            nombre_field = row.controls[0]
+            precio_field = row.controls[1]
+            
+            nombre = nombre_field.value.strip()
+            precio_str = precio_field.value.strip()
+            
+            if not nombre or not precio_str:
+                return
+                
+            try:
+                precio = float(precio_str)
+                # Agregar platillo a la categoría
+                for cat in self.categorias:
+                    if cat["nombre"] == categoria_nombre:
+                        cat["platillos"].append({"nombre": nombre, "precio": precio})
+                        nombre_field.value = ""
+                        precio_field.value = ""
+                        self.actualizar_lista_categorias(lista)  # Recargar
+                        self.page.update()
+                        break
+            except ValueError:
+                pass
 
-        except Exception as e:
-            print(f"Error cargando mesas existentes: {e}")
-
-    btn_generar = ft.ElevatedButton("Generar Campos", on_click=generar_inputs_mesas)
-    btn_guardar_mesas = ft.ElevatedButton("Guardar Configuración Mesas", on_click=guardar_configuracion_mesas, bgcolor=ft.Colors.BLUE_700, color=ft.Colors.WHITE)
-
-    tab_mesas = ft.Container(
-        content=ft.Column([
-            ft.Text("Configuración de Mesas", size=20, weight=ft.FontWeight.BOLD),
-            ft.Text("Define cuántas mesas tiene tu restaurante y su capacidad.", size=14, color=ft.Colors.GREY_400),
-            ft.Row([
-                total_mesas_input,
-                btn_generar
-            ]),
-            ft.Divider(),
-            ft.Text("Detalle por Mesa:", size=16),
-            config_mesas_container,
-            ft.Divider(),
-            btn_guardar_mesas
-        ]),
-        padding=20
-    )
-
-    # --- INICIALIZACIÓN ---
-    cargar_datos_menu()
-    cargar_mesas_existentes()
-
-    t = ft.Tabs(
-        selected_index=0,
-        tabs=[
-            ft.Tab(text="Menú y Platillos", content=tab_menu),
-            ft.Tab(text="Configurar Mesas", content=tab_mesas),
-        ],
-        expand=True,
-    )
-
-    return t
+        for cat in self.categorias:
+            platillos_col = ft.Column()
+            for p in cat["platillos"]:
+                platillos_col.controls.append(
+                    ft.Text(f"• {p['nombre']} - ${p['precio']:.2f}")
+                )
+            
+            lista.controls.append(
+                ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ft.Text(cat["nombre"], weight=ft.FontWeight.BOLD, size=16),
+                            ft.IconButton(
+                                ft.Icons.DELETE,
+                                on_click=lambda e, c=cat["nombre"]: self.eliminar_categoria(c, lista),
+                                tooltip="Eliminar categoría"
+                            )
+                        ], alignment="spaceBetween"),
+                        
+                        ft.Row([
+                            ft.TextField(label="Nombre platillo", width=280),
+                            ft.TextField(label="Precio $", width=120, input_filter=ft.NumbersOnlyInputFilter()),
+                            ft.ElevatedButton(
+                                "Agregar",
+                                on_click=lambda e, c=cat["nombre"]: agregar_platillo_local(e, c)
+                            )
+                        ]),
+                        
+                        platillos_col
+                    ]),
+                    bgcolor=ft.Colors.BLUE_GREY_800,
+                    padding=15,
+                    border_radius=10,
+                    margin=ft.margin.only(bottom=10)
+                )
+            )
+        self.page.update()
+    
+    def mostrar_error(self, mensaje):
+        self.page.snack_bar = ft.SnackBar(ft.Text(mensaje), bgcolor=ft.Colors.RED_700)
+        self.page.snack_bar.open = True
+        self.page.update()
