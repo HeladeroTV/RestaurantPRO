@@ -116,6 +116,16 @@ def read_root():
     log.debug("GET / → Página de bienvenida solicitada")
     return {"message": "Bienvenido a la API del Sistema de Restaurante"}
 
+
+async def broadcast_alerta(tipo: str, data: dict):
+    """
+    Función para enviar alertas en tiempo real.
+    Por ahora solo registra en logs, en el futuro usará WebSockets.
+    """
+    log.warning(f"🚨 ALERTA [{tipo.upper()}] → {data}")
+    # Aquí irá tu lógica de WebSocket cuando la implementes
+    # Ejemplo: await manager.broadcast(json.dumps({"tipo": tipo, "data": data}))
+
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     log.debug("Nueva conexión a BD abierta (dependency get_db)")
@@ -196,8 +206,9 @@ def obtener_menu(conn: psycopg2.extensions.connection = Depends(get_db)):
         log.info(f"Menú enviado al cliente - {len(items)} ítems disponibles")
         return items
 
+
 @app.post("/pedidos", response_model=PedidoResponse)
-def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = Depends(get_db)):
+async def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = Depends(get_db)):
     total_items = len(pedido.items)
     mesa = pedido.mesa_numero
     es_digital = mesa == 99
@@ -225,13 +236,15 @@ def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = De
                 """, (receta['id'],))
                 
                 for ing in cursor.fetchall():
-                    cantidad_total_necesaria = ing['cantidad_necesaria'] * cantidad_pedido
+                    cantidad_total_necesaria = float(ing['cantidad_necesaria']) * cantidad_pedido
+                    cantidad_actual = float(ing['cantidad_disponible'])
                     
-                    if ing['cantidad_disponible'] < cantidad_total_necesaria:
-                        log.warning(f"STOCK INSUFICIENTE → '{ing['nombre_ingrediente']}' | Disp: {ing['cantidad_disponible']} | Necesario: {cantidad_total_necesaria} → Pedido RECHAZADO")
+                    # ← AQUÍ ESTABA EL PROBLEMA: Ahora usa <= para permitir llegar a 0
+                    if cantidad_actual < cantidad_total_necesaria:
+                        log.warning(f"STOCK INSUFICIENTE → '{ing['nombre_ingrediente']}' | Disp: {cantidad_actual} | Necesario: {cantidad_total_necesaria} → Pedido RECHAZADO")
                         raise HTTPException(
                             status_code=400, 
-                            detail=f"No hay suficiente stock de '{ing['nombre_ingrediente']}' para preparar '{nombre_item}'. Disponible: {ing['cantidad_disponible']}, Necesario: {cantidad_total_necesaria}"
+                            detail=f"No hay suficiente stock de '{ing['nombre_ingrediente']}' para preparar '{nombre_item}'. Disponible: {cantidad_actual}, Necesario: {cantidad_total_necesaria}"
                         )
                     
                     ingredientes_a_consumir.append({
@@ -285,7 +298,7 @@ def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = De
 
                 log.debug(f"Stock actualizado → {nombre_ing} | Quedan: {disponible} {unidad}")
 
-                # ENVIAR ALERTA SI ESTÁ BAJO O CRÍTICO
+                # ENVIAR ALERTA SI ESTÁ BAJO O CRÍTICO (AHORA ASYNC)
                 if disponible <= minimo_alerta:
                     alerta = {
                         "ingrediente": nombre_ing,
@@ -294,7 +307,8 @@ def crear_pedido(pedido: PedidoCreate, conn: psycopg2.extensions.connection = De
                         "unidad": unidad,
                         "mensaje": f"¡Stock crítico de {nombre_ing}! Solo quedan {disponible} {unidad}"
                     }
-                    asyncio.create_task(broadcast_alerta("stock_bajo", alerta))
+                    # ← LÍNEA CORREGIDA: Ahora usa await en vez de create_task
+                    await broadcast_alerta("stock_bajo", alerta)
                     log.warning(f"ALERTA STOCK BAJO ENVIADA → {nombre_ing} ({disponible} ≤ {minimo_alerta})")
 
         conn.commit()
