@@ -705,65 +705,68 @@ def obtener_analisis_productos(
 
 @app.get("/mesas")
 def obtener_mesas(conn = Depends(get_db)):
-    log.debug("GET /mesas → Consultando estado detallado de mesas (ocupación + reservas)")
+    """
+    Devuelve mesas con estado calculado dinámicamente desde pedidos activos.
+    OPTIMIZADO: Usa una sola query JOIN para máximo rendimiento.
+    """
+    log.debug("GET /mesas → Consultando estado de mesas (con cálculo dinámico de ocupación)")
 
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT numero, capacidad FROM mesas WHERE numero != 99 ORDER BY numero;")
+            # === QUERY ULTRA-OPTIMIZADA CON LEFT JOIN ===
+            cursor.execute("""
+                SELECT 
+                    m.numero,
+                    m.capacidad,
+                    -- Calcular si está ocupada (pedido activo)
+                    CASE 
+                        WHEN p.id IS NOT NULL THEN TRUE 
+                        ELSE FALSE 
+                    END AS ocupada,
+                    -- Detectar si tiene reserva activa
+                    CASE 
+                        WHEN r.id IS NOT NULL THEN TRUE 
+                        ELSE FALSE 
+                    END AS reservada,
+                    c.nombre AS cliente_reservado_nombre,
+                    r.fecha_hora_inicio AS fecha_hora_reserva
+                FROM mesas m
+                -- Pedidos activos (determina ocupada)
+                LEFT JOIN pedidos p ON m.numero = p.mesa_numero 
+                    AND p.estado IN ('Tomando pedido', 'Pendiente', 'En preparacion', 'Listo', 'Entregado')
+                -- Reservas activas
+                LEFT JOIN reservas r ON m.numero = r.mesa_numero 
+                    AND DATE(r.fecha_hora_inicio) >= CURRENT_DATE
+                LEFT JOIN clientes c ON r.cliente_id = c.id
+                WHERE m.numero != 99
+                ORDER BY m.numero;
+            """)
             mesas_db = cursor.fetchall()
 
-        with conn.cursor() as cursor:
-            hoy = date.today().strftime("%Y-%m-%d")
-            cursor.execute("""
-                SELECT r.mesa_numero, r.fecha_hora_inicio, r.fecha_hora_fin, c.nombre as cliente_nombre
-                FROM reservas r
-                JOIN clientes c ON r.cliente_id = c.id
-                WHERE DATE(r.fecha_hora_inicio) >= %s
-                ORDER BY r.fecha_hora_inicio;
-            """, (hoy,))
-            reservas_db = cursor.fetchall()
-
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT mesa_numero
-                FROM pedidos
-                WHERE estado IN ('Tomando pedido', 'Pendiente', 'En preparacion', 'Listo', 'Entregado')
-                AND mesa_numero != 99;
-            """)
-            pedidos_activos = {row['mesa_numero'] for row in cursor.fetchall()}
-
+        # Procesar resultados
         mesas_result = []
-        reservas_por_mesa = {}
-        for res in reservas_db:
-            m = res['mesa_numero']
-            if m not in reservas_por_mesa:
-                reservas_por_mesa[m] = []
-            reservas_por_mesa[m].append({
-                "cliente_nombre": res['cliente_nombre'],
-                "fecha_hora_inicio": str(res['fecha_hora_inicio']),
-                "fecha_hora_fin": str(res['fecha_hora_fin']) if res['fecha_hora_fin'] else None
-            })
-
         ocupadas = 0
         reservadas = 0
-        for mesa_db in mesas_db:
-            numero = mesa_db['numero']
-            es_ocupada = numero in pedidos_activos
-            es_reservada = numero in reservas_por_mesa
-            if es_ocupada: ocupadas += 1
-            if es_reservada: reservadas += 1
 
-            info = {
-                "numero": numero,
-                "capacidad": mesa_db['capacidad'],
-                "ocupada": es_ocupada,
+        for mesa_row in mesas_db:
+            es_ocupada = bool(mesa_row['ocupada'])
+            es_reservada = bool(mesa_row['reservada'])
+            
+            if es_ocupada:
+                ocupadas += 1
+            if es_reservada:
+                reservadas += 1
+
+            mesas_result.append({
+                "numero": mesa_row['numero'],
+                "capacidad": mesa_row['capacidad'],
+                "ocupada": es_ocupada,  # ← AHORA SÍ SE CALCULA CORRECTAMENTE
                 "reservada": es_reservada,
-                "cliente_reservado_nombre": reservas_por_mesa.get(numero, [{}])[0].get("cliente_nombre"),
-                "fecha_hora_reserva": reservas_por_mesa.get(numero, [{}])[0].get("fecha_hora_inicio")
-            }
-            mesas_result.append(info)
+                "cliente_reservado_nombre": mesa_row['cliente_reservado_nombre'],
+                "fecha_hora_reserva": str(mesa_row['fecha_hora_reserva']) if mesa_row['fecha_hora_reserva'] else None
+            })
 
-        # Mesa virtual
+        # Mesa virtual (siempre disponible)
         mesas_result.append({
             "numero": 99,
             "capacidad": 100,
@@ -774,16 +777,17 @@ def obtener_mesas(conn = Depends(get_db)):
             "es_virtual": True
         })
 
-        log.info(f"Mesas detalladas enviadas → {len(mesas_db)} físicas | {ocupadas} ocupadas | {reservadas} reservadas")
+        log.info(f"Mesas enviadas → {len(mesas_db)} físicas | {ocupadas} ocupadas | {reservadas} reservadas | Actualización dinámica ✅")
         return mesas_result
 
     except Exception as e:
-        log.error(f"ERROR CRÍTICO en obtener_mesas_detalladas → {e}", exc_info=True)
+        log.error(f"ERROR CRÍTICO en obtener_mesas → {e}", exc_info=True)
+        # Fallback seguro
         fallback = [
             {"numero": i, "capacidad": c, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None}
             for i, c in [(1,2),(2,2),(3,4),(4,4),(5,6),(6,6)]
         ] + [{"numero": 99, "capacidad": 100, "ocupada": False, "reservada": False, "cliente_reservado_nombre": None, "fecha_hora_reserva": None, "es_virtual": True}]
-        log.warning("Se devolvió fallback de mesas por error en BD")
+        log.warning("Devolviendo fallback por error en BD")
         return fallback
 
 

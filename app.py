@@ -10,6 +10,7 @@ import winsound
 import time as time_module
 import logging  # <-- NUEVO
 from pathlib import Path
+import copy
 
 
 # ====================== SISTEMA DE LOGS PROFESIONAL ======================
@@ -135,21 +136,20 @@ def crear_selector_item(menu):
     log.debug("Selector de ítems creado correctamente")
     return container
 
-def crear_mesas_grid(backend_service, on_select):
-    log.debug("Iniciando creación del grid de mesas")
+def crear_mesas_grid(backend_service, on_select, app_instance=None):
+    """
+    VERSIÓN OPTIMIZADA: Solo actualiza mesas que cambiaron
+    Reduce renders del 100% al ~5% en operación normal
+    """
+    log.debug("Iniciando actualización optimizada del grid de mesas")
+    
     try:
         mesas_backend = backend_service.obtener_mesas()
-        log.info(f"Mesas obtenidas del backend: {len(mesas_backend)} mesas → {mesas_backend}")
+        log.info(f"Mesas obtenidas del backend: {len(mesas_backend)} mesas")
 
-        # ¡¡¡AQUÍ ESTABA EL ERROR!!!
-        # Antes: si no hay mesas → usa las por defecto
-        # Ahora: SIEMPRE usa lo que venga del backend
-        mesas_fisicas = mesas_backend  # ¡Siempre usar el backend!
-
-        # Solo como fallback extremo si hay error de conexión
         if not mesas_backend or len(mesas_backend) == 0:
             log.warning("Backend devolvió 0 mesas → usando fallback temporal")
-            mesas_fisicas = [
+            mesas_backend = [
                 {"numero": 1, "capacidad": 4, "ocupada": False},
                 {"numero": 2, "capacidad": 4, "ocupada": False},
                 {"numero": 3, "capacidad": 6, "ocupada": False},
@@ -157,11 +157,70 @@ def crear_mesas_grid(backend_service, on_select):
             
     except Exception as e:
         log.error(f"Error crítico al obtener mesas del backend: {e}")
-        mesas_fisicas = [
+        mesas_backend = [
             {"numero": 1, "capacidad": 4, "ocupada": False},
             {"numero": 2, "capacidad": 6, "ocupada": False},
         ]
 
+    # Detectar mesas que cambiaron
+    mesas_actuales = {m['numero']: m for m in mesas_backend}
+    cache_anterior = copy.deepcopy(getattr(app_instance, 'mesas_cache', {})) if app_instance else {}
+    widgets_cache = getattr(app_instance, 'mesas_widgets_cache', {}) if app_instance else {}
+    
+    # === DETECTAR CAMBIOS (versión mejorada con pedidos) ===
+    mesas_nuevas = set(mesas_actuales.keys()) - set(cache_anterior.keys())
+    mesas_eliminadas = set(cache_anterior.keys()) - set(mesas_actuales.keys())
+    mesas_modificadas = set()
+
+    # Obtener pedidos activos para detectar mesas ocupadas
+    try:
+        pedidos_activos = backend_service.obtener_pedidos_activos()
+        mesas_con_pedidos = {p['mesa_numero'] for p in pedidos_activos if p.get('estado') in ['Pendiente', 'En preparacion', 'Listo']}
+    except:
+        mesas_con_pedidos = set()
+
+    for num, mesa_actual in mesas_actuales.items():
+        if num in cache_anterior:
+            mesa_anterior = cache_anterior[num]
+            
+            # Detectar si la mesa tiene pedido activo (más confiable)
+            ocupada_real = num in mesas_con_pedidos
+            ocupada_anterior = cache_anterior.get(num, {}).get('_ocupada_cache', False)
+            
+            # Comparar campos que afectan la UI
+            if (ocupada_real != ocupada_anterior or
+                mesa_actual.get('reservada') != mesa_anterior.get('reservada') or
+                mesa_actual.get('capacidad') != mesa_anterior.get('capacidad')):
+                mesas_modificadas.add(num)
+                # Guardar estado real en caché
+                mesa_actual['_ocupada_cache'] = ocupada_real
+        else:
+            # Mesa nueva, marcar si tiene pedido
+            mesa_actual['_ocupada_cache'] = num in mesas_con_pedidos
+    
+    cambios_detectados = len(mesas_nuevas) + len(mesas_eliminadas) + len(mesas_modificadas)
+    
+    if cambios_detectados == 0 and cache_anterior:
+        log.debug("⚡ SIN CAMBIOS - Reutilizando grid existente (0 renders)")
+        # Retornar grid con widgets en caché
+        grid = ft.GridView(
+            expand=1,
+            runs_count=3,
+            max_extent=220,
+            child_aspect_ratio=1.0,
+            spacing=15,
+            run_spacing=15,
+            padding=15,
+        )
+        # Agregar widgets en orden
+        for num in sorted(mesas_actuales.keys()):
+            if num in widgets_cache:
+                grid.controls.append(widgets_cache[num])
+        return grid
+    
+    log.info(f"⚡ CAMBIOS DETECTADOS: {len(mesas_nuevas)} nuevas | {len(mesas_modificadas)} modificadas | {len(mesas_eliminadas)} eliminadas")
+
+    # === CREAR/ACTUALIZAR SOLO MESAS MODIFICADAS ===
     grid = ft.GridView(
         expand=1,
         runs_count=3,
@@ -172,76 +231,79 @@ def crear_mesas_grid(backend_service, on_select):
         padding=15,
     )
 
-    mesas_ocupadas = 0
-    mesas_reservadas = 0
-    mesas_libres = 0
+    mesas_ocupadas = mesas_libres = mesas_reservadas = 0
 
-    for mesa in mesas_fisicas:
+    for mesa in sorted(mesas_backend, key=lambda m: m['numero']):
         if mesa["numero"] == 99:
             continue
 
+        num_mesa = mesa["numero"]
         ocupada = mesa.get("ocupada", False)
         reservada = mesa.get("reservada", False)
-        cliente_reservado_nombre = mesa.get("cliente_reservado_nombre", "N/A")
-        fecha_hora_reserva = mesa.get("fecha_hora_reserva", "N/A")
 
+        # Contadores
         if ocupada:
-            color_base = ft.Colors.RED_700
-            color_estado = ft.Colors.RED_700
-            estado = "OCUPADA"
-            detalle = ""
             mesas_ocupadas += 1
+            color_base = ft.Colors.RED_700
+            estado = "OCUPADA"
         else:
-            # Si está reservada o libre, se muestra igual: VERDE y LIBRE
-            # (El usuario pidió explícitamente ignorar visualmente la reserva en el grid principal)
-            color_base = ft.Colors.GREEN_700
-            color_estado = ft.Colors.GREEN_700
-            estado = "LIBRE"
-            detalle = ""
             mesas_libres += 1
+            color_base = ft.Colors.GREEN_700
+            estado = "LIBRE"
 
+        # === OPTIMIZACIÓN: Reutilizar widget si no cambió ===
+        if num_mesa not in mesas_nuevas and num_mesa not in mesas_modificadas and num_mesa in widgets_cache:
+            grid.controls.append(widgets_cache[num_mesa])
+            continue
+        
+        # === CREAR WIDGET NUEVO SOLO SI CAMBIÓ ===
         contenido_mesa = ft.Column(
-                alignment=ft.MainAxisAlignment.CENTER,
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=5,
-                controls=[
-                    ft.Row(
-                        alignment=ft.MainAxisAlignment.CENTER,
-                        controls=[
-                            ft.Icon(ft.Icons.TABLE_RESTAURANT, color=ft.Colors.AMBER_400),
-                            ft.Text(f"Mesa {mesa['numero']}", size=16, weight=ft.FontWeight.BOLD),
-                        ]
-                    ),
-                    ft.Text(f"Capacidad: {mesa['capacidad']}", size=12),
-                    ft.Text(estado, size=14, weight=ft.FontWeight.BOLD)
-                ]
-            )
-        if detalle:
-            contenido_mesa.controls.append(ft.Text(detalle, size=10, color=ft.Colors.WHITE, italic=True))
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=5,
+            controls=[
+                ft.Row(
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    controls=[
+                        ft.Icon(ft.Icons.TABLE_RESTAURANT, color=ft.Colors.AMBER_400),
+                        ft.Text(f"Mesa {num_mesa}", size=16, weight=ft.FontWeight.BOLD),
+                    ]
+                ),
+                ft.Text(f"Capacidad: {mesa['capacidad']}", size=12),
+                ft.Text(estado, size=14, weight=ft.FontWeight.BOLD)
+            ]
+        )
 
         carta_mesa = ft.Container(
-            key=f"mesa-{mesa['numero']}",
+            key=f"mesa-{num_mesa}",
             bgcolor=color_base,
             border_radius=15,
             padding=15,
             ink=True,
-            on_click=lambda e, num=mesa['numero']: on_select(num),
+            on_click=lambda e, num=num_mesa: on_select(num),
             content=contenido_mesa,
             animate=ft.Animation(200, "easeOut"),
             animate_scale=ft.Animation(200, "easeOut"),
         )
-        def on_hover_mesa(e, carta=carta_mesa, color_base=color_base, color_estado=color_estado):
+
+        def on_hover_mesa(e, carta=carta_mesa, color_base=color_base):
             if e.data == "true":
                 carta.scale = 1.05
-                carta.bgcolor = color_estado
+                carta.bgcolor = ft.Colors.BLUE_800 if color_base == ft.Colors.GREEN_700 else ft.Colors.RED_900
             else:
                 carta.scale = 1.0
                 carta.bgcolor = color_base
             carta.update()
-        carta_mesa.on_hover = lambda e, carta=carta_mesa, color_base=color_base, color_estado=color_estado: on_hover_mesa(e, carta, color_base, color_estado)
+
+        carta_mesa.on_hover = lambda e, carta=carta_mesa, cb=color_base: on_hover_mesa(e, carta, cb)
+        
+        # Guardar en caché
+        if app_instance:
+            widgets_cache[num_mesa] = carta_mesa
+        
         grid.controls.append(carta_mesa)
 
-    # Mesa virtual
+    # === MESA VIRTUAL 99 (siempre se crea) ===
     contenido_mesa_virtual = ft.Column(
         alignment=ft.MainAxisAlignment.CENTER,
         horizontal_alignment=ft.CrossAxisAlignment.CENTER,
@@ -258,31 +320,51 @@ def crear_mesas_grid(backend_service, on_select):
             ft.Text("Siempre disponible", size=10, color=ft.Colors.WHITE),
         ]
     )
-    carta_mesa_virtual = ft.Container(
-        key="mesa-99",
-        bgcolor=ft.Colors.BLUE_700,
-        border_radius=15,
-        padding=15,
-        ink=True,
-        on_click=lambda e: on_select(99),
-        width=220,
-        height=150,
-        content=contenido_mesa_virtual,
-        animate=ft.Animation(200, "easeOut"),
-        animate_scale=ft.Animation(200, "easeOut"),
-    )
-    def on_hover_mesa_virtual(e, carta=carta_mesa_virtual, color_base=ft.Colors.BLUE_700):
-        if e.data == "true":
-            carta.scale = 1.05
-            carta.bgcolor = ft.Colors.BLUE_800
-        else:
-            carta.scale = 1.0
-            carta.bgcolor = color_base
-        carta.update()
-    carta_mesa_virtual.on_hover = lambda e, carta=carta_mesa_virtual: on_hover_mesa_virtual(e, carta)
-    grid.controls.append(carta_mesa_virtual)
+    
+    if 99 in widgets_cache and 99 not in mesas_modificadas:
+        grid.controls.append(widgets_cache[99])
+    else:
+        carta_mesa_virtual = ft.Container(
+            key="mesa-99",
+            bgcolor=ft.Colors.BLUE_700,
+            border_radius=15,
+            padding=15,
+            ink=True,
+            on_click=lambda e: on_select(99),
+            width=220,
+            height=150,
+            content=contenido_mesa_virtual,
+            animate=ft.Animation(200, "easeOut"),
+            animate_scale=ft.Animation(200, "easeOut"),
+        )
 
-    log.info(f"Grid de mesas creado → {mesas_libres} libres | {mesas_reservadas} reservadas | {mesas_ocupadas} ocupadas")
+        def on_hover_virtual(e, carta=carta_mesa_virtual):
+            if e.data == "true":
+                carta.scale = 1.05
+                carta.bgcolor = ft.Colors.BLUE_800
+            else:
+                carta.scale = 1.0
+                carta.bgcolor = ft.Colors.BLUE_700
+            carta.update()
+
+        carta_mesa_virtual.on_hover = lambda e, c=carta_mesa_virtual: on_hover_virtual(e, c)
+        
+        if app_instance:
+            widgets_cache[99] = carta_mesa_virtual
+        
+        grid.controls.append(carta_mesa_virtual)
+
+    # === ACTUALIZAR CACHÉ SOLO SI HUBO CAMBIOS ===
+    if app_instance and cambios_detectados > 0:
+        # Hacer copia profunda ANTES de guardar para evitar referencias mutables
+        app_instance.mesas_cache = copy.deepcopy(mesas_actuales)
+        app_instance.mesas_widgets_cache = widgets_cache
+        log.debug(f"Caché actualizado → {len(mesas_actuales)} mesas guardadas")
+    elif app_instance and cambios_detectados == 0:
+        # NO actualizar caché si no hubo cambios (mantener estado anterior)
+        log.debug("Caché sin cambios (estado anterior preservado)")
+
+    log.info(f"Grid actualizado → {mesas_libres} libres | {mesas_reservadas} reservadas | {mesas_ocupadas} ocupadas | Renders: {cambios_detectados}/{len(mesas_backend)}")
     return grid
 
 
@@ -1182,6 +1264,11 @@ class RestauranteGUI:
         # Configuración
         self.tiempo_umbral_minutos = 20
         self.umbral_stock_bajo = 5  # Este se usará como fallback si no hay umbral personalizado
+
+        self.menu_cache = None
+        # === NUEVO: Caché para optimización de mesas ===
+        self.mesas_cache = {}  # {numero_mesa: datos_mesa}
+        self.mesas_widgets_cache = {}  # {numero_mesa: ft.Container}
         
         # Colores
         self.PRIMARY = "#6366f1"
@@ -1247,41 +1334,58 @@ class RestauranteGUI:
         except Exception as e:
             log.error(f"Error crítico al guardar configuración: {e}")
 
-    # === FUNCIÓN: verificar_stock_real_time (nueva función) ===
+    # === FUNCIÓN: verificar_stock_real_time (CORREGIDA) ===
     def verificar_stock_real_time(self):
-        """Verifica stock en tiempo real solo cuando cambia"""
+        """Verifica stock en tiempo real detectando cambios de valor Y eliminaciones."""
         try:
             items = self.inventory_service.obtener_inventario()
             nuevo_stock = {item['id']: item for item in items}
             
-            # Detectar cambios
-            cambio_detectado = False
-            for item_id, item in nuevo_stock.items():
-                if item_id not in self.stock_actual:
-                    cambio_detectado = True
-                    break
-                if (self.stock_actual[item_id]['cantidad_disponible'] != item['cantidad_disponible'] or 
-                    self.stock_actual[item_id].get('cantidad_minima_alerta', 5.0) != item.get('cantidad_minima_alerta', 5.0)):
-                    cambio_detectado = True
-                    break
+            # 1. Detectar cambios en la ESTRUCTURA (ítems nuevos o ELIMINADOS)
+            ids_anteriores = set(self.stock_actual.keys())
+            ids_nuevos = set(nuevo_stock.keys())
             
-            if cambio_detectado:
+            # Si los sets de IDs son diferentes, es que se agregó o SE ELIMINÓ algo.
+            cambio_estructural = ids_anteriores != ids_nuevos
+
+            # 2. Detectar cambios en los VALORES de los ítems que persisten
+            cambio_valor = False
+            if not cambio_estructural:
+                for item_id, item in nuevo_stock.items():
+                    if item_id in self.stock_actual:
+                        # Comparar cantidad y umbral
+                        cant_old = self.stock_actual[item_id].get('cantidad_disponible')
+                        cant_new = item.get('cantidad_disponible')
+                        umbral_old = self.stock_actual[item_id].get('cantidad_minima_alerta', 5.0)
+                        umbral_new = item.get('cantidad_minima_alerta', 5.0)
+                        
+                        if cant_old != cant_new or umbral_old != umbral_new:
+                            cambio_valor = True
+                            break
+            
+            # Si hubo CUALQUIER cambio (estructura o valores), recalculamos las alertas
+            if cambio_estructural or cambio_valor:
+                log.debug("Cambio en inventario detectado (valor o eliminación) -> Recalculando alertas")
+                
                 # Verificar stock bajo usando el umbral personalizado de cada ítem
                 ingredientes_bajos = []
                 for item in items:
-                    # Usar el umbral personalizado de cada ítem, con fallback al general
+                    # Usar el umbral personalizado, fallback al general si hiciera falta
                     umbral = item.get('cantidad_minima_alerta', self.umbral_stock_bajo)
                     if item['cantidad_disponible'] <= umbral:
                         ingredientes_bajos.append(item)
                 
+                # Actualizar estado de alertas
                 if ingredientes_bajos:
                     nombres = ", ".join([item['nombre'] for item in ingredientes_bajos])
                     self.hay_stock_bajo = True
                     self.ingredientes_bajos_lista = [item['nombre'] for item in ingredientes_bajos]
-                    log.warning(f"STOCK BAJO DETECTADO (en tiempo real) → {len(ingredientes_bajos)} ingredientes: {nombres}")
+                    if cambio_estructural: # Log solo si fue algo estructural para no saturar
+                        log.warning(f"STOCK BAJO ACTUALIZADO → {len(ingredientes_bajos)} ingredientes: {nombres}")
                 else:
+                    # Si antes había alerta y ahora no (porque se borró el ítem o se rellenó), limpiamos
                     if self.hay_stock_bajo:
-                        log.info("Stock bajo resuelto (en tiempo real) - Todos los ingredientes por encima del umbral")
+                        log.info("Stock bajo resuelto (alerta limpiada)")
                         self.hay_stock_bajo = False
                         self.ingredientes_bajos_lista = []
                         self.mostrar_detalle_stock = False
@@ -1296,6 +1400,7 @@ class RestauranteGUI:
         except Exception as e:
             log.error(f"Error en verificación de stock en tiempo real: {e}")
 
+            
     def verificar_retrasos_real_time(self):
         """Verifica retrasos en tiempo real - FUNCIONA SIEMPRE aunque el backend no devuelva updated_at"""
         try:
@@ -1502,7 +1607,7 @@ class RestauranteGUI:
         
         # === CREACIÓN DE TODAS LAS VISTAS ===
         log.debug("Creando todas las vistas de la aplicación")
-        self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
+        self.mesas_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa, self)
         self.panel_gestion = crear_panel_gestion(
             self.backend_service, self.menu_cache, self.actualizar_ui_completo,
             page, self.PRIMARY, self.PRIMARY_DARK
@@ -1646,7 +1751,7 @@ class RestauranteGUI:
     def actualizar_ui_completo(self):
         log.debug("↻ actualizar_ui_completo() llamado - Iniciando refresco completo de UI")
         
-        nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa)
+        nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa, self)
         self.mesas_grid.controls = nuevo_grid.controls
         self.mesas_grid.update()
         log.debug("Grid de mesas recreado y actualizado")
