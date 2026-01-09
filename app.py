@@ -784,10 +784,9 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
     log.info("Panel de gestión de pedidos creado correctamente")
     return panel
 
-# === FUNCIÓN: crear_vista_cocina (MODIFICADA PARA DETECCIÓN DE RETRASOS EN TIEMPO REAL) ===
-# Vista de cocina para ver y gestionar pedidos activos.
+
 def crear_vista_cocina(backend_service, on_update_ui, page):
-    log.debug("Creando vista de Cocina (versión con detección de retrasos)")
+    log.debug("Creando vista de Cocina (versión con ícono de advertencia para retrasos)")
     lista_pedidos = ft.ListView(
         expand=1,
         spacing=10,
@@ -865,11 +864,25 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
 
     def crear_item_pedido_cocina(pedido, backend_service, on_update_ui):
         pedido_id = pedido["id"]
-        origen = f"{obtener_titulo_pedido(pedido)} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
-
-        # Marcar como atrasado si está en la lista de alertas
+        titulo_base = obtener_titulo_pedido(pedido)
+        
+        # Verificar si el pedido está retrasado
         pedido_atrasado = any(a['id_pedido'] == pedido_id for a in alertas_retraso_vista)
-        bg_color_pedido = ft.Colors.RED_700 if pedido_atrasado else ft.Colors.BLUE_GREY_900
+        
+        # Si está retrasado, agregar ícono de advertencia al título
+        if pedido_atrasado:
+            # Encontrar la alerta para obtener el tiempo de retraso
+            alerta = next((a for a in alertas_retraso_vista if a['id_pedido'] == pedido_id), None)
+            tiempo_retraso = alerta['tiempo_retraso'] if alerta else 0
+            origen = f"⚠️ {titulo_base} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
+            # Agregar información adicional sobre el retraso
+            info_retraso = ft.Text(f"RETRASADO: {tiempo_retraso:.1f} minutos", size=12, color=ft.Colors.YELLOW_600, weight=ft.FontWeight.BOLD)
+        else:
+            origen = f"{titulo_base} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
+            info_retraso = None
+
+        # MANTENER SIEMPRE EL MISMO COLOR DE FONDO (no usar rojo para retrasados)
+        bg_color_pedido = ft.Colors.BLUE_GREY_900
 
         def cambiar_estado(e, p, nuevo_estado):
             try:
@@ -882,7 +895,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
         def eliminar_pedido_click(e):
             try:
                 backend_service.eliminar_pedido(pedido["id"])
-                log.warning(f"Pedido ELIMINADO por cocina → ID: {pedido_id} | {origen}")
+                log.warning(f"Pedido ELIMINADO por cocina → ID: {pedido_id} | {titulo_base}")
                 on_update_ui() # Esto debería disparar la actualización de alertas
             except Exception as ex:
                 log.error(f"Error al eliminar pedido {pedido_id} desde cocina: {ex}")
@@ -890,36 +903,49 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
         notas_pedido = pedido.get('notas', '').strip()
         nota = "Sin Nota" if not notas_pedido else f"Notas: {notas_pedido}"
 
-        return ft.Container(
-            content=ft.Column([
-                ft.Row([
-                    ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
-                    ft.IconButton(
-                        icon=ft.Icons.DELETE,
-                        on_click=eliminar_pedido_click,
-                        tooltip="Eliminar pedido",
-                        icon_color=ft.Colors.RED_700
-                    )
-                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                ft.Text(generar_resumen_pedido(pedido)),
-                ft.Text(nota, color=ft.Colors.YELLOW_200),
-                ft.Row([
-                    ft.ElevatedButton(
-                        "En preparacion",
-                        on_click=lambda e, p=pedido: cambiar_estado(e, p, "En preparacion"),
-                        disabled=pedido.get("estado") != "Pendiente",
-                        style=ft.ButtonStyle(bgcolor=ft.Colors.ORANGE_700, color=ft.Colors.WHITE)
-                    ),
-                    ft.ElevatedButton(
-                        "Listo",
-                        on_click=lambda e, p=pedido: cambiar_estado(e, p, "Listo"),
-                        disabled=pedido.get("estado") != "En preparacion",
-                        style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-                    ),
-                ]),
-                ft.Text(f"Estado: {pedido.get('estado', 'Pendiente')}", color=ft.Colors.BLUE_200)
+        # Construir los controles base
+        controls_list = [
+            ft.Row([
+                ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
+                ft.IconButton(
+                    icon=ft.Icons.DELETE,
+                    on_click=eliminar_pedido_click,
+                    tooltip="Eliminar pedido",
+                    icon_color=ft.Colors.RED_700
+                )
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Text(generar_resumen_pedido(pedido))
+        ]
+
+        # Agregar información de retraso si aplica
+        if info_retraso:
+            controls_list.insert(2, info_retraso)
+            
+        # Agregar nota
+        controls_list.append(ft.Text(nota, color=ft.Colors.YELLOW_200))
+        
+        # Agregar botones de estado
+        controls_list.extend([
+            ft.Row([
+                ft.ElevatedButton(
+                    "En preparacion",
+                    on_click=lambda e, p=pedido: cambiar_estado(e, p, "En preparacion"),
+                    disabled=pedido.get("estado") != "Pendiente",
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.ORANGE_700, color=ft.Colors.WHITE)
+                ),
+                ft.ElevatedButton(
+                    "Listo",
+                    on_click=lambda e, p=pedido: cambiar_estado(e, p, "Listo"),
+                    disabled=pedido.get("estado") != "En preparacion",
+                    style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
+                ),
             ]),
-            bgcolor=bg_color_pedido, # Color dinámico según estado de retraso
+            ft.Text(f"Estado: {pedido.get('estado', 'Pendiente')}", color=ft.Colors.BLUE_200)
+        ])
+
+        return ft.Container(
+            content=ft.Column(controls_list),
+            bgcolor=bg_color_pedido, # SIEMPRE EL MISMO COLOR
             padding=10,
             border_radius=10,
         )
@@ -933,7 +959,7 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
         expand=True
     )
     vista.actualizar = actualizar
-    log.info("Vista de Cocina (versión con detección de retrasos) creada correctamente")
+    log.info("Vista de Cocina (versión con ícono de advertencia) creada correctamente")
     return vista
 
 def crear_vista_admin(backend_service, menu, on_update_ui, page):
