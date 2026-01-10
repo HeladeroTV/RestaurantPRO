@@ -1282,3 +1282,71 @@ def crear_mesa(mesa: dict, conn=Depends(get_db)):
     except Exception as e:
         log.error(f"Error al crear mesa: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/reportes/rango")
+def obtener_reporte_rango(
+    fecha_inicio: str, 
+    fecha_fin: str, 
+    conn = Depends(get_db)
+):
+    """
+    Endpoint para obtener reporte en un rango de fechas
+    """
+    try:
+        with conn.cursor() as cursor:
+            # Obtener ventas totales en el rango
+            cursor.execute("""
+                SELECT 
+                    COALESCE(SUM(total), 0) as ventas_totales,
+                    COUNT(*) as pedidos_totales
+                FROM pedidos 
+                WHERE DATE(fecha_hora) BETWEEN %s AND %s 
+                AND estado = 'Pagado'
+            """, (fecha_inicio, fecha_fin))
+            
+            resultado = cursor.fetchone()
+            ventas_totales = float(resultado[0]) if resultado[0] else 0
+            pedidos_totales = int(resultado[1]) if resultado[1] else 0
+            
+            # Obtener productos vendidos en el rango
+            cursor.execute("""
+                SELECT SUM(pp.cantidad) as productos_vendidos
+                FROM pedidos p
+                JOIN pedido_producto pp ON p.id = pp.pedido_id
+                WHERE DATE(p.fecha_hora) BETWEEN %s AND %s
+                AND p.estado = 'Pagado'
+            """, (fecha_inicio, fecha_fin))
+            
+            resultado_productos = cursor.fetchone()
+            productos_vendidos = int(resultado_productos[0]) if resultado_productos[0] else 0
+            
+            # Obtener productos más vendidos
+            cursor.execute("""
+                SELECT 
+                    pr.nombre,
+                    SUM(pp.cantidad) as cantidad
+                FROM pedidos p
+                JOIN pedido_producto pp ON p.id = pp.pedido_id
+                JOIN productos pr ON pp.producto_id = pr.id
+                WHERE DATE(p.fecha_hora) BETWEEN %s AND %s
+                AND p.estado = 'Pagado'
+                GROUP BY pr.id, pr.nombre
+                ORDER BY cantidad DESC
+                LIMIT 10
+            """, (fecha_inicio, fecha_fin))
+            
+            productos_mas_vendidos = [
+                {"nombre": row[0], "cantidad": int(row[1])}
+                for row in cursor.fetchall()
+            ]
+            
+            return {
+                "ventas_totales": ventas_totales,
+                "pedidos_totales": pedidos_totales,
+                "productos_vendidos": productos_vendidos,
+                "productos_mas_vendidos": productos_mas_vendidos
+            }
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al generar reporte: {str(e)}")

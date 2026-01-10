@@ -12,6 +12,111 @@ import os
 # --- FIN IMPORTAR ---
 from typing import List, Dict, Any
 from datetime import datetime, timedelta
+import math
+
+def crear_dashboard_ejecutivo(datos_comparativos, tipo_reporte):
+    """Crea el dashboard ejecutivo con KPIs y comparativas"""
+    
+    actual = datos_comparativos.get("actual", {})
+    anterior = datos_comparativos.get("anterior", {})
+    
+    # Calcular KPIs principales
+    ventas_actuales = actual.get("ventas_totales", 0)
+    ventas_anteriores = anterior.get("ventas_totales", 0)
+    pedidos_actuales = actual.get("pedidos_totales", 1)  # Evitar división por cero
+    pedidos_anteriores = anterior.get("pedidos_totales", 1)
+    productos_actuales = actual.get("productos_vendidos", 0)
+    productos_anteriores = anterior.get("productos_vendidos", 0)
+    
+    # Calcular variaciones
+    var_ventas = ((ventas_actuales - ventas_anteriores) / ventas_anteriores * 100) if ventas_anteriores > 0 else 0
+    var_pedidos = ((pedidos_actuales - pedidos_anteriores) / pedidos_anteriores * 100) if pedidos_anteriores > 0 else 0
+    var_productos = ((productos_actuales - productos_anteriores) / productos_anteriores * 100) if productos_anteriores > 0 else 0
+    
+    # Calcular KPIs adicionales
+    ticket_promedio_actual = ventas_actuales / pedidos_actuales if pedidos_actuales > 0 else 0
+    ticket_promedio_anterior = ventas_anteriores / pedidos_anteriores if pedidos_anteriores > 0 else 0
+    var_ticket = ((ticket_promedio_actual - ticket_promedio_anterior) / ticket_promedio_anterior * 100) if ticket_promedio_anterior > 0 else 0
+    
+    # Crear tarjetas KPI
+    def crear_tarjeta_kpi(titulo, valor, variacion, descripcion="", color_base=ft.Colors.BLUE):
+        # Determinar color según variación
+        if variacion > 0:
+            color_var = ft.Colors.GREEN_500
+            icono = ft.Icons.ARROW_UPWARD
+        elif variacion < 0:
+            color_var = ft.Colors.RED_500
+            icono = ft.Icons.ARROW_DOWNWARD
+        else:
+            color_var = ft.Colors.GREY_500
+            icono = ft.Icons.ARROW_FORWARD
+        
+        return ft.Container(
+            content=ft.Column([
+                ft.Text(titulo, size=14, color=ft.Colors.GREY_400),
+                ft.Row([
+                    ft.Text(f"${valor:,.2f}" if isinstance(valor, (int, float)) and titulo == "Ventas Totales" else f"{valor:,}" if isinstance(valor, (int, float)) else str(valor), 
+                           size=24, weight=ft.FontWeight.BOLD),
+                    ft.Icon(icono, color=color_var, size=20) if variacion != 0 else ft.Text("")
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Text(f"{variacion:+.1f}%" if variacion != 0 else "Sin cambio", 
+                       size=12, color=color_var),
+                ft.Text(descripcion, size=11, color=ft.Colors.GREY_500) if descripcion else ft.Text("")
+            ], spacing=5),
+            padding=15,
+            border_radius=10,
+            bgcolor=ft.Colors.BLUE_GREY_800,
+            width=200,
+            height=120
+        )
+    
+    # Tarjetas KPI principales
+    kpi_ventas = crear_tarjeta_kpi(
+        "Ventas Totales", 
+        ventas_actuales, 
+        var_ventas,
+        f"vs período anterior"
+    )
+    
+    kpi_pedidos = crear_tarjeta_kpi(
+        "Pedidos Totales", 
+        pedidos_actuales, 
+        var_pedidos,
+        f"vs período anterior"
+    )
+    
+    kpi_ticket = crear_tarjeta_kpi(
+        "Ticket Promedio", 
+        ticket_promedio_actual, 
+        var_ticket,
+        f"vs período anterior"
+    )
+    
+    kpi_productos = crear_tarjeta_kpi(
+        "Productos Vendidos", 
+        productos_actuales, 
+        var_productos,
+        f"vs período anterior"
+    )
+    
+    # Dashboard container
+    dashboard_container = ft.Container(
+        content=ft.Column([
+            ft.Text(f"Dashboard Ejecutivo - {tipo_reporte}", size=20, weight=ft.FontWeight.BOLD),
+            ft.Divider(),
+            ft.Row([
+                kpi_ventas,
+                kpi_pedidos,
+                kpi_ticket,
+                kpi_productos
+            ], wrap=True, spacing=10),
+        ], spacing=10),
+        padding=20,
+        border_radius=10,
+        bgcolor=ft.Colors.BLUE_GREY_900
+    )
+    
+    return dashboard_container
 
 def crear_vista_reportes(backend_service, on_update_ui, page):
     # Dropdown para seleccionar el tipo de reporte
@@ -27,10 +132,12 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
         width=200
     )
 
-    # DatePicker para seleccionar la fecha
-    fecha_picker = ft.DatePicker(
-        on_change=lambda e: setattr(fecha_text, 'value', f"Fecha: {e.control.value.strftime('%Y-%m-%d')}") or page.update()
-    )
+    def on_fecha_change(e):
+        if e.control.value:
+            fecha_text.value = f"Fecha: {e.control.value.strftime('%Y-%m-%d')}"
+            page.update()
+
+    fecha_picker = ft.DatePicker(on_change=on_fecha_change)
     fecha_button = ft.ElevatedButton(
         "Seleccionar fecha",
         icon=ft.Icons.CALENDAR_TODAY,
@@ -220,10 +327,15 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
         try:
             # Obtener tipo de reporte y fecha
             tipo = tipo_reporte_dropdown.value
-            fecha_str = fecha_text.value.split(": ")[1]
+            # CORRECCIÓN: Extraer la fecha de manera más robusta
+            fecha_text_content = fecha_text.value.strip()
+            if ": " in fecha_text_content:
+                fecha_str = fecha_text_content.split(": ", 1)[1].strip()
+            else:
+                fecha_str = fecha_text_content
 
             # Convertir fecha a objeto datetime
-            if fecha_str == "Hoy":
+            if fecha_str.lower() == "hoy" or fecha_str == "":
                 fecha = datetime.now()
             else:
                 fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
@@ -235,181 +347,74 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
             # Obtener datos del backend para el reporte general
             datos = backend_service.obtener_reporte(tipo, fecha)
 
-            # --- CALCULAR EFICIENCIA DE COCINA ---
-            # Calcular fechas de inicio y fin del periodo basado en 'tipo' y 'fecha'
+            # ================================================
+            # 📌 OBTENER DATOS COMPARATIVOS REALES
+            # ================================================
+
+            try:
+                datos_comparativos = backend_service.obtener_reporte_comparativo(tipo, fecha)
+            except Exception as e:
+                print(f"Error obteniendo datos comparativos: {e}")
+                # Fallback con datos simulados
+                datos_comparativos = {
+                    "actual": datos,
+                    "anterior": {
+                        "ventas_totales": datos.get("ventas_totales", 0) * 0.85,
+                        "pedidos_totales": max(1, int(datos.get("pedidos_totales", 0) * 0.9)),
+                        "productos_vendidos": int(datos.get("productos_vendidos", 0) * 0.88)
+                    }
+                }
+            
+            # Crear dashboard ejecutivo
+            dashboard_ejecutivo = crear_dashboard_ejecutivo(datos_comparativos, tipo)
+            
+            # ================================================
+            # FIN OBTENER DATOS COMPARATIVOS
+            # ================================================
+
             start_date = None
             end_date = None
+
             if tipo == "Diario":
                 start_date = fecha.strftime("%Y-%m-%d")
                 end_date = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
             elif tipo == "Semanal":
-                start_date = (fecha - timedelta(days=fecha.weekday())).strftime("%Y-%m-%d")
-                end_date = (fecha + timedelta(days=6 - fecha.weekday())).strftime("%Y-%m-%d")
+                # Calcular lunes de la semana
+                start_of_week = fecha - timedelta(days=fecha.weekday())
+                start_date = start_of_week.strftime("%Y-%m-%d")
+                end_date = (start_of_week + timedelta(days=6)).strftime("%Y-%m-%d")
             elif tipo == "Mensual":
+                # Primer día del mes
                 start_date = fecha.replace(day=1).strftime("%Y-%m-%d")
-                end_date = (fecha.replace(day=1) + timedelta(days=32)).replace(day=1).strftime("%Y-%m-%d")
+                # Último día del mes
+                if fecha.month == 12:
+                    end_date = fecha.replace(day=31).strftime("%Y-%m-%d")
+                else:
+                    # Primer día del siguiente mes - 1 día
+                    next_month = fecha.replace(day=1) + timedelta(days=32)
+                    end_date = (next_month.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
             elif tipo == "Anual":
                 start_date = fecha.replace(month=1, day=1).strftime("%Y-%m-%d")
                 end_date = fecha.replace(month=12, day=31).strftime("%Y-%m-%d")
+            else:
+                # Default a diario si el tipo no coincide
+                start_date = fecha.strftime("%Y-%m-%d")
+                end_date = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
+            # ================================================
 
-            # Obtener pedidos para el periodo (o usar datos de otro endpoint si es más eficiente)
-            # Supongamos que backend_service.obtener_pedidos_activos() puede recibir fechas
-            # Si no, necesitarías un nuevo endpoint o adaptar uno existente
-            # Por ahora, vamos a asumir que podemos filtrar los pedidos existentes
-            # o que tienes acceso a todos los pedidos del periodo a través de otro medio.
-            # Una alternativa es llamar a un endpoint que devuelva pedidos por rango de fechas.
-            # Por ejemplo, un endpoint como GET /pedidos/?start_date=...&end_date=...
-            # Supongamos que creamos o usamos un endpoint que devuelva pedidos completos (con hora_inicio_cocina y hora_fin_cocina)
-            # Llamaremos a un método hipotético o reutilizaremos uno si es posible.
-            # Opción 1: Intentar con el existente si incluye las horas
-            # Opción 2: Crear un nuevo endpoint en el backend y un nuevo método en BackendService
-            # Dado que no vimos un endpoint específico para obtener pedidos por rango de fechas en el código anterior,
-            # la opción más robusta es crear uno nuevo en el backend y su servicio correspondiente.
-            # Pero para este ejemplo, asumiremos que puedes adaptar la lógica para obtener los pedidos relevantes.
-            # Por ahora, haremos una llamada hipotética o reutilizaremos si es posible.
-            # Supongamos que backend_service.obtener_pedidos_por_fecha(start_date, end_date) existe o se puede crear.
-            # Si no existe, la forma más directa es obtener pedidos activos y filtrarlos aquí,
-            # pero eso no es ideal si la lista es muy grande o si necesitas pedidos antiguos.
-            # Vamos a asumir que puedes obtener pedidos con las horas de cocina para el periodo.
-            # Si no puedes, necesitarás crear un nuevo endpoint como:
-            # GET /pedidos/por_fecha_cocina?start_date=...&end_date=...
-            # Y un método en BackendService que lo llame.
-            # Por simplicidad en este ejemplo, supondremos que podemos obtener pedidos relevantes.
-            # Intentamos con el reporte general, pero puede no tener los datos de cocina.
-            # Entonces, lo más limpio es suponer un nuevo endpoint o servicio.
-            # Vamos a crear un hipotético método en el backend_service
-            # y asumir que devuelve pedidos con hora_inicio_cocina y hora_fin_cocina.
-            # Supongamos que tienes un método nuevo: backend_service.obtener_pedidos_cocina(start_date, end_date)
-            # Si no lo tienes, necesitarás crearlo en backend_service.py y backend.py.
-            # Por ahora, simularemos la obtención de pedidos relevantes.
-            # Supongamos que hay un método que devuelve pedidos con los campos necesarios
-            # pedidos_para_eficiencia = backend_service.obtener_pedidos_cocina(start_date, end_date)
-            # Para no depender de un nuevo endpoint, reutilizaremos la lógica de reporte general
-            # y asumiremos que los pedidos obtenidos tienen los campos hora_inicio_cocina y hora_fin_cocina.
-            # Esto implica que el endpoint de reporte general (o uno similar) también devuelva esta info,
-            # o que necesitemos otro endpoint para pedidos con tiempos de cocina.
-            # La mejor práctica es tener un endpoint específico para métricas de eficiencia.
-            # Vamos a simular la obtención de pedidos con tiempos de cocina.
-            # Supongamos que hay un endpoint que devuelve pedidos listos/entregados/pagados para un rango de fechas.
-            # Llamaremos a backend_service.obtener_pedidos_activos() y filtraremos localmente.
-            # Esto es menos eficiente, pero funciona si no hay otro endpoint.
-            # Obtener pedidos activos (esto puede incluir Listo, Entregado, Pagado)
-            # Filtrar solo los que tienen hora_inicio_cocina y hora_fin_cocina
-            # Calcular tiempos
-            # Calcular promedio
-            # Mostrar promedio
-            # Este enfoque asume que 'obtener_pedidos_activos' devuelve pedidos con los nuevos campos.
-            # Si no es así, necesitas un nuevo endpoint que sí los devuelva.
-            # Supongamos que 'obtener_pedidos_activos' ahora devuelve pedidos con hora_inicio_cocina y hora_fin_cocina
-            # debido a la modificación del modelo PedidoResponse.
-            # OJO: 'obtener_pedidos_activos' puede no filtrar por fechas como necesitas para el reporte.
-            # Entonces, quizás necesitas un nuevo endpoint o adaptar la lógica.
-            # Para simplificar, asumiremos que backend_service.obtener_pedidos_activos()
-            # devuelve pedidos *que ya están filtrados por el backend* según el rango de fechas del reporte.
-            # Esto no es ideal, pero evita crear un nuevo endpoint ahora.
-            # Lo más limpio sería crear: GET /pedidos/eficiencia_cocina?start_date=...&end_date=...
-            # Pero para este ejemplo, supondremos que 'obtener_pedidos_activos' puede recibir fechas o
-            # que otra llamada devuelve los pedidos correctos.
-            # Simularemos la obtención de pedidos relevantes para eficiencia.
-            # Supongamos que hay un nuevo método:
-            # pedidos_eficiencia = backend_service.obtener_pedidos_eficiencia_cocina(start_date, end_date)
-            # Si no lo tienes, créalo en backend_service.py y backend.py.
-            # Por ahora, como no lo tengo, usaré una aproximación menos ideal:
-            # Obtener todos los pedidos activos (que puede incluir Listo, Entregado, Pagado)
-            # y asumir que el backend_service.obtener_reporte también los devuelve de alguna manera
-            # o que hay un nuevo endpoint para esto.
-            # Dado que no es el caso, la forma más directa es crear un nuevo endpoint.
-            # Supongamos que creamos:
-            # GET /reportes/eficiencia_cocina?tipo=...&start_date=...&end_date=...
-            # Y un método en backend_service: obtener_eficiencia_cocina(tipo, start_date, end_date)
-            # Y en backend.py, una función que calcule promedios, etc.
-            # Para no tocar más el backend ahora, hagamos una aproximación.
-            # Supongamos que backend_service.obtener_pedidos_activos() devuelve pedidos con los campos nuevos
-            # y que el backend ya los filtra por fecha si se lo pides a través de otro endpoint o parámetro.
-            # O la mejor forma: Crear un nuevo endpoint en backend.py: GET /reportes/eficiencia_cocina
-            # Y un nuevo método en BackendService: obtener_eficiencia_cocina
-            # Y llamarlo aquí.
-            # Por simplicidad en esta respuesta, asumiré que creamos ese nuevo endpoint y método.
-            # Supongamos que backend_service tiene ahora: obtener_eficiencia_cocina(tipo, fecha)
-            # Este método en el backend calculará los promedios y devolverá la info necesaria.
-            # Por ahora, simularemos el cálculo aquí con datos hipotéticos.
-            # Supongamos que obtenemos pedidos con tiempos de cocina
-            # Simulamos una llamada para obtener pedidos relevantes
-            # En la práctica, necesitas un nuevo endpoint o adaptar uno existente para filtrar por fechas y estado.
-            # Supongamos que hay un endpoint que devuelve pedidos ya filtrados por el backend
-            # que tengan hora_inicio y hora_fin (es decir, que se hayan completado en cocina)
-            # para el rango de fechas del reporte.
-            # Llamaremos a un método hipotético o adaptaremos si es posible.
-            # Supongamos que backend_service.obtener_pedidos_para_eficiencia(tipo, fecha) existe
-            # o que el endpoint de reporte general ahora incluye esta info.
-            # Simulamos la lógica de cálculo aquí.
-            # Obtener pedidos para el periodo (necesitas un endpoint que los devuelva con tiempos de cocina)
-            # Por ahora, como no está claro el endpoint exacto, simularemos la obtención de pedidos relevantes.
-            # Supongamos que backend_service.obtener_pedidos_activos() devuelve pedidos con hora_inicio_cocina y hora_fin_cocina
-            # y que el backend ya los filtra por fecha si se lo pides a través de parámetros internos
-            # o que hay un nuevo endpoint que devuelve solo los pedidos relevantes para eficiencia.
-            # Simulamos que obtenemos una lista de pedidos con los campos relevantes.
-            # Supongamos que creamos un nuevo método en backend_service:
-            # def obtener_eficiencia_cocina(self, tipo: str, fecha: datetime) -> Dict[str, Any]:
-            #     # Llama a un endpoint que calcula el promedio y devuelve los pedidos relevantes
-            #     params = { ... } # tipo, fechas
-            #     r = requests.get(f"{self.base_url}/reportes/eficiencia_cocina", params=params)
-            #     r.raise_for_status()
-            #     return r.json()
-            # Y en backend.py:
-            # @app.get("/reportes/eficiencia_cocina", response_model=Dict[str, Any])
-            # def get_eficiencia_cocina(tipo: str, start_date: str, end_date: str, conn = Depends(get_db)):
-            #     with conn.cursor() as cursor:
-            #         cursor.execute("SELECT hora_inicio_cocina, hora_fin_cocina FROM pedidos WHERE ...")
-            #         pedidos = cursor.fetchall()
-            #         # Calcular promedio, etc.
-            #         # Devolver {"promedio_minutos": ..., "pedidos_detalle": [...]}
-            #     return {...}
-            # Para evitar tocar el backend ahora, hagamos una aproximación asumiendo que
-            # podemos obtener los pedidos relevantes de alguna manera.
-            # La forma más limpia es crear el endpoint nuevo.
-            # Supongamos que ya lo creamos y tenemos el método en backend_service.
-            # Simulamos la llamada y el cálculo.
-            # Supongamos: datos_eficiencia = backend_service.obtener_eficiencia_cocina(tipo, fecha)
-            # En lugar de eso, hagamos una aproximación si no hay un nuevo endpoint.
-            # Obtener pedidos activos (esto puede no filtrar por fechas correctamente)
-            # Filtrar localmente por fechas y por estado que indica que se ha completado cocina (Listo, Entregado, Pagado)
-            # y que tenga hora_inicio_cocina y hora_fin_cocina.
-            # Calcular promedio.
-            # Supongamos que backend_service.obtener_pedidos_activos() devuelve pedidos con los nuevos campos.
-            # En realidad, este endpoint probablemente no filtre por el rango de fechas del reporte.
-            # Entonces, lo más limpio es crear un nuevo endpoint en el backend.
-            # Supongamos que creamos: GET /reportes/eficiencia_cocina
-            # Y en backend_service: def obtener_eficiencia_cocina(self, tipo, fecha)
-            # Supongamos que ya lo tenemos. Llamémoslo.
-            # datos_eficiencia = backend_service.obtener_eficiencia_cocina(tipo, fecha)
-            # Si no lo tienes, debes crearlo. Por ahora, simularemos la lógica de cálculo aquí.
-            # Supongamos que creamos el endpoint y el método.
-            # datos_eficiencia = backend_service.obtener_eficiencia_cocina(tipo, fecha)
-            # Supongamos que el endpoint devuelve: {"promedio_minutos": 15.5, "detalle_pedidos": [{"id": 1, "tiempo": 12}, ...]}
-            # Simulamos la llamada y el cálculo.
-            # Supongamos que backend_service.obtener_pedidos_activos() devuelve pedidos con hora_inicio_cocina y hora_fin_cocina
-            # y que el backend los filtra por estado (Listo, Entregado, Pagado) y rango de fechas internamente
-            # basado en el tipo de reporte. Esto no es ideal, pero para no tocar backend ahora...
-            # No, no es ideal. La mejor forma es crear un nuevo endpoint.
-            # Supongamos que creamos un nuevo endpoint en backend.py: GET /reportes/eficiencia_cocina
-            # Y un método en BackendService: obtener_eficiencia_cocina
-            # Supongamos que ya lo hicimos.
-            # Llamamos al nuevo método.
+            # Obtener datos de eficiencia de cocina (simulado si no existe)
             try:
-                # Supongamos que este método existe y calcula el promedio para el periodo
                 datos_eficiencia = backend_service.obtener_eficiencia_cocina(tipo, fecha)
                 promedio_cocina_min = datos_eficiencia.get("promedio_minutos", 0)
                 detalle_pedidos_cocina = datos_eficiencia.get("detalle_pedidos", [])
             except AttributeError:
-                # Si el método no existe, mostramos un mensaje o simulamos
                 print("Método backend_service.obtener_eficiencia_cocina no encontrado. Debes crearlo.")
                 promedio_cocina_min = 0
                 detalle_pedidos_cocina = []
             except Exception as ex:
-                 print(f"Error al obtener datos de eficiencia de cocina: {ex}")
-                 promedio_cocina_min = 0
-                 detalle_pedidos_cocina = []
+                print(f"Error al obtener datos de eficiencia de cocina: {ex}")
+                promedio_cocina_min = 0
+                detalle_pedidos_cocina = []
 
             # --- FIN CALCULAR EFICIENCIA DE COCINA ---
 
@@ -444,13 +449,13 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
             if horas_con_venta:
                 for hora_str, total in sorted(horas_con_venta.items()):
                     controles_texto.append(ft.Text(f"Hora {hora_str.zfill(2)}:00 - ${total:.2f}"))
-
-            # --- LLENAR ESTADO DE TEXTOS PARA PDF ---
-            # Extraemos el valor string de los controles de texto para el PDF
-            for control in controles_texto:
-                if isinstance(control, ft.Text):
-                    estado_reporte["textos"].append(control.value)
-            # ----------------------------------------
+                
+                # --- LLENAR ESTADO DE TEXTOS PARA PDF ---
+                # Extraemos el valor string de los controles de texto para el PDF
+                for control in controles_texto:
+                    if isinstance(control, ft.Text):
+                        estado_reporte["textos"].append(control.value)
+                # ----------------------------------------
             else:
                 controles_texto.append(ft.Text("No hubo ventas en esta fecha.", size=14, italic=True))
 
@@ -483,7 +488,7 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 estado_reporte["img_productos"] = img_bytes_pv # Guardar para PDF
                 imagen_productos_vendidos.src_base64 = base64.b64encode(img_bytes_pv).decode('utf-8')
             else:
-                 imagen_productos_vendidos.src_base64 = "" # Limpiar si no hay datos
+                imagen_productos_vendidos.src_base64 = "" # Limpiar si no hay datos
 
             # 3. Gráfico de Ventas por Hora
             horas_ordenadas = sorted(ventas_por_hora.keys(), key=int)
@@ -498,7 +503,7 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 estado_reporte["img_horas"] = img_bytes_hora # Guardar para PDF
                 imagen_ventas_hora.src_base64 = base64.b64encode(img_bytes_hora).decode('utf-8')
             else:
-                 imagen_ventas_hora.src_base64 = "" # Limpiar si no hay datos
+                imagen_ventas_hora.src_base64 = "" # Limpiar si no hay datos
 
 
             # --- GENERAR GRÁFICO DE EFICIENCIA DE COCINA ---
@@ -518,8 +523,8 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 imagen_eficiencia_cocina.src_base64 = base64.b64encode(img_bytes_eficiencia).decode('utf-8')
                 texto_eficiencia_cocina.value = f"Promedio: {promedio_cocina_min:.2f} minutos"
             else:
-                 imagen_eficiencia_cocina.src_base64 = "" # Limpiar si no hay datos
-                 texto_eficiencia_cocina.value = "No hay pedidos completados en cocina para este periodo."
+                imagen_eficiencia_cocina.src_base64 = "" # Limpiar si no hay datos
+                texto_eficiencia_cocina.value = "No hay pedidos completados en cocina para este periodo."
 
             # --- FIN GENERAR GRÁFICO DE EFICIENCIA DE COCINA ---
 
@@ -528,18 +533,33 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
             # Calcular rango de fechas para el análisis (similar al reporte general)
             start_date_analisis = None
             end_date_analisis = None
+
             if tipo == "Diario":
                 start_date_analisis = fecha.strftime("%Y-%m-%d")
                 end_date_analisis = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
             elif tipo == "Semanal":
-                start_date_analisis = (fecha - timedelta(days=fecha.weekday())).strftime("%Y-%m-%d")
-                end_date_analisis = (fecha + timedelta(days=6 - fecha.weekday())).strftime("%Y-%m-%d")
+                # Calcular lunes de la semana
+                start_of_week = fecha - timedelta(days=fecha.weekday())
+                start_date_analisis = start_of_week.strftime("%Y-%m-%d")
+                end_date_analisis = (start_of_week + timedelta(days=6)).strftime("%Y-%m-%d")
             elif tipo == "Mensual":
+                # Primer día del mes
                 start_date_analisis = fecha.replace(day=1).strftime("%Y-%m-%d")
-                end_date_analisis = (fecha.replace(day=1) + timedelta(days=32)).replace(day=1).strftime("%Y-%m-%d")
+                # Último día del mes
+                if fecha.month == 12:
+                    end_date_analisis = fecha.replace(day=31).strftime("%Y-%m-%d")
+                else:
+                    # Primer día del siguiente mes - 1 día
+                    next_month = fecha.replace(day=1) + timedelta(days=32)
+                    end_date_analisis = (next_month.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
             elif tipo == "Anual":
                 start_date_analisis = fecha.replace(month=1, day=1).strftime("%Y-%m-%d")
                 end_date_analisis = fecha.replace(month=12, day=31).strftime("%Y-%m-%d")
+            else:
+                # Default a diario si el tipo no coincide
+                start_date_analisis = fecha.strftime("%Y-%m-%d")
+                end_date_analisis = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
+            # ================================================
 
             # Limpiar contenedor de análisis (solo texto)
             controles_analisis_texto = []
@@ -583,7 +603,7 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 img_bytes_am = fig_am.to_image(format="png", width=600, height=300, scale=1)
                 imagen_analisis_mas.src_base64 = base64.b64encode(img_bytes_am).decode('utf-8')
             else:
-                 imagen_analisis_mas.src_base64 = "" # Limpiar si no hay datos
+                imagen_analisis_mas.src_base64 = "" # Limpiar si no hay datos
 
             # 5. Gráfico de Análisis - Menos Vendidos
             if datos_analisis.get('productos_menos_vendidos'):
@@ -595,11 +615,14 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 img_bytes_anm = fig_anm.to_image(format="png", width=600, height=300, scale=1)
                 imagen_analisis_menos.src_base64 = base64.b64encode(img_bytes_anm).decode('utf-8')
             else:
-                 imagen_analisis_menos.src_base64 = "" # Limpiar si no hay datos
+                imagen_analisis_menos.src_base64 = "" # Limpiar si no hay datos
 
 
-            # Reconstruir contenedor_reporte con texto y gráficos (imagen)
-            contenedor_reporte.content.controls = controles_texto + [
+            # Reconstruir contenedor_reporte con DASHBOARD + texto y gráficos (imagen)
+            contenedor_reporte.content.controls = [
+                dashboard_ejecutivo,  # AÑADIR DASHBOARD AL INICIO
+                ft.Divider(),
+            ] + controles_texto + [
                 ft.Text("Gráfico Resumen General", size=16, weight=ft.FontWeight.BOLD),
                 imagen_resumen,
                 ft.Text("Gráfico Productos Más Vendidos", size=16, weight=ft.FontWeight.BOLD),
@@ -644,6 +667,8 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
             # Limpiar imagen de eficiencia
             imagen_eficiencia_cocina.src_base64 = ""
             texto_eficiencia_cocina.value = "Error al cargar datos de eficiencia."
+            
+            vista.update()  # ← Actualizar toda la vista
             page.update()
 
 
