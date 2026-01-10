@@ -855,6 +855,9 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
 
     # Variables para almacenar alertas de retraso detectadas en esta vista
     alertas_retraso_vista = []
+    
+    # ===== NUEVO: ESTADO DEL FILTRO =====
+    filtro_actual = {"valor": "todos"}  # todos | pendiente | preparacion | retrasados
 
     def actualizar():
         nonlocal alertas_retraso_vista
@@ -876,13 +879,8 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
                             fecha_pedido = datetime.strptime(fecha_pedido_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
                             mins_retraso = (ahora - fecha_pedido).total_seconds() / 60
 
-                            # Supongamos que la instancia principal tiene el umbral
-                            # (esto se obtiene de la página o de una variable global si no es accesible directamente aquí)
-                            # Por ahora, usaremos un valor fijo o uno pasado como parámetro si es posible
-                            # OJO: Esto es un punto crítico. La mejor forma es pasar el umbral desde la instancia principal.
-                            # Por simplicidad temporal, usaremos 20 minutos como ejemplo.
-                            # Lo ideal es poder acceder a app_instance.tiempo_umbral_minutos
-                            umbral_retraso = 20 # Este valor debería venir de la instancia principal de la app
+                            # Obtener umbral desde la instancia principal
+                            umbral_retraso = 20 # Valor por defecto
 
                             # Intentar acceder al umbral desde la instancia principal si está disponible
                             if hasattr(page, 'app_instance') and hasattr(page.app_instance, 'tiempo_umbral_minutos'):
@@ -913,10 +911,38 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
                  if hasattr(page.app_instance, 'actualizar_visibilidad_alerta'):
                      page.app_instance.actualizar_visibilidad_alerta()
 
-            lista_pedidos.controls.clear()
+            # ===== FILTRAR PEDIDOS SEGÚN FILTRO ACTIVO =====
+            pedidos_filtrados = []
             for pedido in pedidos:
                 if pedido.get("estado") in ["Pendiente", "En preparacion"] and pedido.get("items"):
-                    lista_pedidos.controls.append(crear_item_pedido_cocina(pedido, backend_service, on_update_ui))
+                    pedido_atrasado = any(a['id_pedido'] == pedido['id'] for a in alertas_retraso_vista)
+                    
+                    # Aplicar filtro
+                    if filtro_actual["valor"] == "todos":
+                        pedidos_filtrados.append(pedido)
+                    elif filtro_actual["valor"] == "pendiente" and pedido.get("estado") == "Pendiente":
+                        pedidos_filtrados.append(pedido)
+                    elif filtro_actual["valor"] == "preparacion" and pedido.get("estado") == "En preparacion":
+                        pedidos_filtrados.append(pedido)
+                    elif filtro_actual["valor"] == "retrasados" and pedido_atrasado:
+                        pedidos_filtrados.append(pedido)
+
+            # ===== ACTUALIZAR CONTADORES EN BOTONES =====
+            total_pedidos = len([p for p in pedidos if p.get("estado") in ["Pendiente", "En preparacion"] and p.get("items")])
+            total_pendientes = sum(1 for p in pedidos if p.get("estado") == "Pendiente" and p.get("items"))
+            total_preparacion = sum(1 for p in pedidos if p.get("estado") == "En preparacion" and p.get("items"))
+            total_retrasados = len(alertas_retraso_vista)
+
+            btn_todos.text = f"📋 Todos ({total_pedidos})"
+            btn_pendientes.text = f"⏳ Pendientes ({total_pendientes})"
+            btn_preparacion.text = f"👨‍🍳 En Prep. ({total_preparacion})"
+            btn_retrasados.text = f"⚠️ Retrasados ({total_retrasados})"
+
+            # ===== ACTUALIZAR LISTA DE PEDIDOS =====
+            lista_pedidos.controls.clear()
+            for pedido in pedidos_filtrados:
+                lista_pedidos.controls.append(crear_item_pedido_cocina(pedido, backend_service, on_update_ui))
+            
             page.update()
         except Exception as e:
             log.error(f"Error crítico al actualizar vista Cocina: {e}")
@@ -928,26 +954,106 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
         # Verificar si el pedido está retrasado
         pedido_atrasado = any(a['id_pedido'] == pedido_id for a in alertas_retraso_vista)
         
-        # Si está retrasado, agregar ícono de advertencia al título
+        # ===== CALCULAR TIEMPO TRANSCURRIDO =====
+        try:
+            fecha_pedido_str = pedido.get('fecha_hora', '')
+            if fecha_pedido_str:
+                fecha_pedido = datetime.strptime(fecha_pedido_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
+                ahora = datetime.now()
+                minutos_transcurridos = (ahora - fecha_pedido).total_seconds() / 60
+            else:
+                minutos_transcurridos = 0
+        except:
+            minutos_transcurridos = 0
+        
+        # ===== NUEVO SISTEMA DE COLORES POR ESTADO =====
+        estado_pedido = pedido.get("estado", "Pendiente")
+        
+        # Definir colores según estado
+        if pedido_atrasado:
+            # RETRASADO: Rojo intenso con borde pulsante
+            bg_color_pedido = ft.Colors.with_opacity(0.15, ft.Colors.RED_900)
+            border_color = ft.Colors.RED_600
+            borde_width = 3
+            icono_estado = ft.Icons.WARNING_AMBER
+            color_icono = ft.Colors.RED_400
+            gradient = ft.LinearGradient(
+                begin=ft.alignment.top_left,
+                end=ft.alignment.bottom_right,
+                colors=[
+                    ft.Colors.with_opacity(0.2, ft.Colors.RED_900),
+                    ft.Colors.with_opacity(0.1, ft.Colors.RED_800),
+                ]
+            )
+        elif estado_pedido == "Pendiente":
+            # PENDIENTE: Azul suave
+            bg_color_pedido = ft.Colors.with_opacity(0.1, ft.Colors.BLUE_900)
+            border_color = ft.Colors.BLUE_700
+            borde_width = 2
+            icono_estado = ft.Icons.SCHEDULE
+            color_icono = ft.Colors.BLUE_400
+            gradient = ft.LinearGradient(
+                begin=ft.alignment.top_left,
+                end=ft.alignment.bottom_right,
+                colors=[
+                    ft.Colors.with_opacity(0.15, ft.Colors.BLUE_900),
+                    ft.Colors.with_opacity(0.05, ft.Colors.BLUE_800),
+                ]
+            )
+        elif estado_pedido == "En preparacion":
+            # EN PREPARACIÓN: Naranja vibrante
+            bg_color_pedido = ft.Colors.with_opacity(0.1, ft.Colors.ORANGE_900)
+            border_color = ft.Colors.ORANGE_700
+            borde_width = 2
+            icono_estado = ft.Icons.RESTAURANT_MENU
+            color_icono = ft.Colors.ORANGE_400
+            gradient = ft.LinearGradient(
+                begin=ft.alignment.top_left,
+                end=ft.alignment.bottom_right,
+                colors=[
+                    ft.Colors.with_opacity(0.15, ft.Colors.ORANGE_900),
+                    ft.Colors.with_opacity(0.05, ft.Colors.ORANGE_800),
+                ]
+            )
+        else:
+            # FALLBACK (por si acaso)
+            bg_color_pedido = ft.Colors.BLUE_GREY_900
+            border_color = ft.Colors.BLUE_GREY_700
+            borde_width = 1
+            icono_estado = ft.Icons.HELP_OUTLINE
+            color_icono = ft.Colors.GREY_400
+            gradient = None
+        
+        # Si está retrasado, agregar información de retraso
         if pedido_atrasado:
             # Encontrar la alerta para obtener el tiempo de retraso
             alerta = next((a for a in alertas_retraso_vista if a['id_pedido'] == pedido_id), None)
             tiempo_retraso = alerta['tiempo_retraso'] if alerta else 0
-            origen = f"⚠️ {titulo_base} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
+            origen = f"{titulo_base} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
             # Agregar información adicional sobre el retraso
-            info_retraso = ft.Text(f"RETRASADO: {tiempo_retraso:.1f} minutos", size=12, color=ft.Colors.YELLOW_600, weight=ft.FontWeight.BOLD)
+            info_retraso = ft.Container(
+                content=ft.Row([
+                    ft.Icon(ft.Icons.ALARM, color=ft.Colors.RED_400, size=16),
+                    ft.Text(
+                        f"RETRASADO: {tiempo_retraso:.1f} minutos",
+                        size=13,
+                        color=ft.Colors.RED_300,
+                        weight=ft.FontWeight.BOLD
+                    )
+                ], spacing=5),
+                padding=ft.padding.only(top=5, bottom=5),
+                bgcolor=ft.Colors.with_opacity(0.2, ft.Colors.RED_900),
+                border_radius=5,
+            )
         else:
             origen = f"{titulo_base} - {pedido.get('fecha_hora', 'Sin fecha')[-8:]}"
             info_retraso = None
-
-        # MANTENER SIEMPRE EL MISMO COLOR DE FONDO (no usar rojo para retrasados)
-        bg_color_pedido = ft.Colors.BLUE_GREY_900
 
         def cambiar_estado(e, p, nuevo_estado):
             try:
                 backend_service.actualizar_estado_pedido(p["id"], nuevo_estado)
                 log.info(f"Estado cambiado → Pedido {p['id']} | {p.get('estado','?')} → {nuevo_estado}")
-                on_update_ui() # Esto debería disparar la actualización de alertas
+                on_update_ui()
             except Exception as ex:
                 log.error(f"Error al cambiar estado del pedido {p['id']} a '{nuevo_estado}': {ex}")
 
@@ -955,70 +1061,292 @@ def crear_vista_cocina(backend_service, on_update_ui, page):
             try:
                 backend_service.eliminar_pedido(pedido["id"])
                 log.warning(f"Pedido ELIMINADO por cocina → ID: {pedido_id} | {titulo_base}")
-                on_update_ui() # Esto debería disparar la actualización de alertas
+                on_update_ui()
             except Exception as ex:
                 log.error(f"Error al eliminar pedido {pedido_id} desde cocina: {ex}")
 
         notas_pedido = pedido.get('notas', '').strip()
-        nota = "Sin Nota" if not notas_pedido else f"Notas: {notas_pedido}"
+        nota = "Sin Nota" if not notas_pedido else f"📝 {notas_pedido}"
+
+        # ===== TEMPORIZADOR EN TIEMPO REAL =====
+        def obtener_color_tiempo(mins):
+            """Retorna color según tiempo transcurrido"""
+            if mins < 10:
+                return ft.Colors.GREEN_400  # Verde: reciente
+            elif mins < 20:
+                return ft.Colors.YELLOW_600  # Amarillo: atención
+            else:
+                return ft.Colors.RED_400  # Rojo: urgente
+        
+        def formatear_tiempo(mins):
+            """Formatea el tiempo de forma legible"""
+            if mins < 1:
+                return "Recién creado"
+            elif mins < 60:
+                return f"hace {int(mins)} min"
+            else:
+                horas = int(mins // 60)
+                mins_restantes = int(mins % 60)
+                return f"hace {horas}h {mins_restantes}min"
+        
+        # Crear el texto del temporizador (se actualizará dinámicamente)
+        temporizador_text = ft.Text(
+            formatear_tiempo(minutos_transcurridos),
+            size=13,
+            color=obtener_color_tiempo(minutos_transcurridos),
+            weight=ft.FontWeight.BOLD
+        )
+        
+        temporizador_container = ft.Container(
+            content=ft.Row([
+                ft.Icon(
+                    ft.Icons.ACCESS_TIME,
+                    color=obtener_color_tiempo(minutos_transcurridos),
+                    size=16
+                ),
+                temporizador_text
+            ], spacing=5),
+            padding=5,
+            bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.BLACK),
+            border_radius=5,
+        )
+
+        # ===== HEADER DEL CARD CON ÍCONO DE ESTADO =====
+        header_card = ft.Container(
+            content=ft.Row([
+                ft.Icon(icono_estado, color=color_icono, size=24),
+                ft.Text(
+                    origen,
+                    size=18,
+                    weight=ft.FontWeight.BOLD,
+                    expand=True
+                ),
+                temporizador_container,
+                ft.IconButton(
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    on_click=eliminar_pedido_click,
+                    tooltip="Eliminar pedido",
+                    icon_color=ft.Colors.RED_400,
+                    hover_color=ft.Colors.RED_900
+                )
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            padding=10,
+            bgcolor=ft.Colors.with_opacity(0.1, border_color),
+            border_radius=ft.border_radius.only(top_left=10, top_right=10),
+        )
 
         # Construir los controles base
         controls_list = [
-            ft.Row([
-                ft.Text(origen, size=20, weight=ft.FontWeight.BOLD),
-                ft.IconButton(
-                    icon=ft.Icons.DELETE,
-                    on_click=eliminar_pedido_click,
-                    tooltip="Eliminar pedido",
-                    icon_color=ft.Colors.RED_700
-                )
-            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ft.Text(generar_resumen_pedido(pedido))
+            header_card,
+            ft.Divider(height=1, color=border_color),
+            ft.Container(
+                content=ft.Text(generar_resumen_pedido(pedido), size=14),
+                padding=10
+            ),
         ]
 
         # Agregar información de retraso si aplica
         if info_retraso:
-            controls_list.insert(2, info_retraso)
+            controls_list.append(ft.Container(content=info_retraso, padding=ft.padding.symmetric(horizontal=10)))
             
         # Agregar nota
-        controls_list.append(ft.Text(nota, color=ft.Colors.YELLOW_200))
+        controls_list.append(
+            ft.Container(
+                content=ft.Text(nota, color=ft.Colors.AMBER_200, size=13, italic=True),
+                padding=10
+            )
+        )
         
         # Agregar botones de estado
-        controls_list.extend([
-            ft.Row([
-                ft.ElevatedButton(
-                    "En preparacion",
-                    on_click=lambda e, p=pedido: cambiar_estado(e, p, "En preparacion"),
-                    disabled=pedido.get("estado") != "Pendiente",
-                    style=ft.ButtonStyle(bgcolor=ft.Colors.ORANGE_700, color=ft.Colors.WHITE)
-                ),
-                ft.ElevatedButton(
-                    "Listo",
-                    on_click=lambda e, p=pedido: cambiar_estado(e, p, "Listo"),
-                    disabled=pedido.get("estado") != "En preparacion",
-                    style=ft.ButtonStyle(bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
-                ),
-            ]),
-            ft.Text(f"Estado: {pedido.get('estado', 'Pendiente')}", color=ft.Colors.BLUE_200)
-        ])
-
-        return ft.Container(
-            content=ft.Column(controls_list),
-            bgcolor=bg_color_pedido, # SIEMPRE EL MISMO COLOR
-            padding=10,
-            border_radius=10,
+        controls_list.append(
+            ft.Container(
+                content=ft.Row([
+                    ft.ElevatedButton(
+                        "🔄 En preparación",
+                        on_click=lambda e, p=pedido: cambiar_estado(e, p, "En preparacion"),
+                        disabled=pedido.get("estado") != "Pendiente",
+                        style=ft.ButtonStyle(
+                            bgcolor={
+                                "": ft.Colors.ORANGE_700,
+                                "disabled": ft.Colors.GREY_800
+                            },
+                            color=ft.Colors.WHITE
+                        ),
+                        expand=True
+                    ),
+                    ft.Container(width=10),
+                    ft.ElevatedButton(
+                        "✅ Listo",
+                        on_click=lambda e, p=pedido: cambiar_estado(e, p, "Listo"),
+                        disabled=pedido.get("estado") != "En preparacion",
+                        style=ft.ButtonStyle(
+                            bgcolor={
+                                "": ft.Colors.GREEN_700,
+                                "disabled": ft.Colors.GREY_800
+                            },
+                            color=ft.Colors.WHITE
+                        ),
+                        expand=True
+                    ),
+                ], spacing=0),
+                padding=10
+            )
         )
+        
+        # Badge de estado
+        controls_list.append(
+            ft.Container(
+                content=ft.Row([
+                    ft.Icon(icono_estado, color=color_icono, size=14),
+                    ft.Text(
+                        f"Estado: {estado_pedido}",
+                        color=color_icono,
+                        size=12,
+                        weight=ft.FontWeight.BOLD
+                    )
+                ], spacing=5),
+                padding=ft.padding.only(left=10, right=10, bottom=10),
+            )
+        )
+
+        # ===== CONTENEDOR PRINCIPAL CON GRADIENTE Y ANIMACIÓN =====
+        card_container = ft.Container(
+            content=ft.Column(controls_list, spacing=0),
+            bgcolor=bg_color_pedido,
+            gradient=gradient,
+            padding=0,
+            border_radius=10,
+            border=ft.border.all(borde_width, border_color),
+            animate=ft.Animation(300, "easeOut"),
+            shadow=ft.BoxShadow(
+                spread_radius=1,
+                blur_radius=8,
+                color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK),
+                offset=ft.Offset(0, 2),
+            )
+        )
+
+        # ===== ANIMACIÓN DE HOVER =====
+        def on_hover_card(e):
+            if e.data == "true":
+                card_container.shadow = ft.BoxShadow(
+                    spread_radius=2,
+                    blur_radius=15,
+                    color=ft.Colors.with_opacity(0.5, border_color),
+                    offset=ft.Offset(0, 4),
+                )
+                card_container.scale = 1.02
+            else:
+                card_container.shadow = ft.BoxShadow(
+                    spread_radius=1,
+                    blur_radius=8,
+                    color=ft.Colors.with_opacity(0.3, ft.Colors.BLACK),
+                    offset=ft.Offset(0, 2),
+                )
+                card_container.scale = 1.0
+            card_container.update()
+
+        card_container.on_hover = on_hover_card
+
+        return card_container
+
+    # ===== FUNCIONES DE FILTRADO =====
+    def cambiar_filtro(nuevo_filtro):
+        """Cambia el filtro activo y actualiza la vista"""
+        filtro_actual["valor"] = nuevo_filtro
+        
+        # Actualizar estilos de botones
+        actualizar_estilos_botones()
+        
+        # Recargar pedidos con el nuevo filtro
+        actualizar()
+        log.info(f"Filtro cambiado a: {nuevo_filtro}")
+
+    def actualizar_estilos_botones():
+        """Actualiza el estilo visual de los botones según el filtro activo"""
+        botones = {
+            "todos": btn_todos,
+            "pendiente": btn_pendientes,
+            "preparacion": btn_preparacion,
+            "retrasados": btn_retrasados
+        }
+        
+        for nombre, boton in botones.items():
+            if filtro_actual["valor"] == nombre:
+                # Botón activo: resaltado
+                boton.style = ft.ButtonStyle(
+                    bgcolor=ft.Colors.BLUE_700,
+                    color=ft.Colors.WHITE,
+                )
+            else:
+                # Botón inactivo: gris
+                boton.style = ft.ButtonStyle(
+                    bgcolor=ft.Colors.BLUE_GREY_800,
+                    color=ft.Colors.GREY_400,
+                )
+        page.update()
+
+    # ===== BOTONES DE FILTRO =====
+    btn_todos = ft.ElevatedButton(
+        text="📋 Todos (0)",
+        on_click=lambda e: cambiar_filtro("todos"),
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.BLUE_700,
+            color=ft.Colors.WHITE,
+        )
+    )
+
+    btn_pendientes = ft.ElevatedButton(
+        text="⏳ Pendientes (0)",
+        on_click=lambda e: cambiar_filtro("pendiente"),
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.BLUE_GREY_800,
+            color=ft.Colors.GREY_400,
+        )
+    )
+
+    btn_preparacion = ft.ElevatedButton(
+        text="👨‍🍳 En Prep. (0)",
+        on_click=lambda e: cambiar_filtro("preparacion"),
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.BLUE_GREY_800,
+            color=ft.Colors.GREY_400,
+        )
+    )
+
+    btn_retrasados = ft.ElevatedButton(
+        text="⚠️ Retrasados (0)",
+        on_click=lambda e: cambiar_filtro("retrasados"),
+        style=ft.ButtonStyle(
+            bgcolor=ft.Colors.BLUE_GREY_800,
+            color=ft.Colors.GREY_400,
+        )
+    )
+
+    # ===== BARRA DE FILTROS =====
+    barra_filtros = ft.Container(
+        content=ft.Row([
+            btn_todos,
+            btn_pendientes,
+            btn_preparacion,
+            btn_retrasados,
+        ], spacing=10, alignment=ft.MainAxisAlignment.START),
+        padding=10,
+        bgcolor=ft.Colors.with_opacity(0.1, ft.Colors.BLUE_GREY_900),
+        border_radius=10,
+    )
 
     vista = ft.Container(
         content=ft.Column([
             ft.Text("Pedidos en Cocina", size=20, weight=ft.FontWeight.BOLD),
+            barra_filtros,  # ← NUEVA BARRA DE FILTROS
             lista_pedidos
         ]),
         padding=20,
         expand=True
     )
     vista.actualizar = actualizar
-    log.info("Vista de Cocina (versión con ícono de advertencia) creada correctamente")
+    log.info("Vista de Cocina (versión con filtros) creada correctamente")
     return vista
 
 def crear_vista_admin(backend_service, menu, on_update_ui, page):
