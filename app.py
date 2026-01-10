@@ -344,7 +344,7 @@ def crear_mesas_grid(backend_service, on_select, app_instance=None):
                 alignment=ft.MainAxisAlignment.CENTER,
                 controls=[
                     ft.Icon(ft.Icons.MOBILE_FRIENDLY, color=ft.Colors.AMBER_400),
-                    ft.Text("Digital", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
+                    ft.Text("Pedido digital", size=16, weight=ft.FontWeight.BOLD, color=ft.Colors.WHITE),
                 ]
             ),
             ft.Text("Pedidos por Digital", size=12, color=ft.Colors.WHITE),
@@ -356,7 +356,7 @@ def crear_mesas_grid(backend_service, on_select, app_instance=None):
         grid.controls.append(widgets_cache[99])
     else:
         carta_mesa_virtual = ft.Container(
-            key="mesa-99",
+            key="Pedido digital",
             bgcolor=ft.Colors.BLUE_700,
             border_radius=15,
             padding=15,
@@ -514,11 +514,17 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                 pedidos_activos = backend_service.obtener_pedidos_activos()
                 pedido_existente = next((p for p in pedidos_activos if p["mesa_numero"] == numero_mesa and p.get("estado") in ["Tomando pedido", "Pendiente", "En preparacion"]), None)
                 if pedido_existente:
-                    estado["pedido_actual"] = pedido_existente
-                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas (Pedido Activo)"
+                    if numero_mesa == 99:
+                        # Mostrar información especial para pedidos digitales
+                        mesa_info.value = f"Mesa Digital - Pedido #{pedido_existente.get('numero_app', 'N/A'):03d} (Pedido Activo)"
+                    else:
+                        mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas (Pedido Activo)"
                     log.info(f"Pedido activo cargado para Mesa {numero_mesa} - ID: {pedido_existente['id']}")
                 else:
-                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Ocupada (Estado inconsistente)"
+                    if numero_mesa == 99:
+                        mesa_info.value = "Mesa Digital - Sin pedido activo"
+                    else:
+                        mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Ocupada (Estado inconsistente)"
                     log.warning(f"Mesa {numero_mesa} marcada como ocupada pero sin pedido activo")
             elif mesa_seleccionada.get("reservada", False):
                 fecha_reserva_str = mesa_seleccionada.get("fecha_hora_reserva")
@@ -527,10 +533,16 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                         fecha_reserva = datetime.strptime(fecha_reserva_str.split(".")[0], "%Y-%m-%d %H:%M:%S")
                         ahora = datetime.now()
                         if ahora >= fecha_reserva or (ahora - fecha_reserva).total_seconds() < 1800:
-                            mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} - Capacidad: {mesa_seleccionada['capacidad']} personas"
+                            if numero_mesa == 99:
+                                mesa_info.value = f"Mesa Digital - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')}"
+                            else:
+                                mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} - Capacidad: {mesa_seleccionada['capacidad']} personas"
                             log.info(f"Reserva activa permitida - Mesa {numero_mesa}")
                         else:
-                            mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} el {fecha_reserva_str}"
+                            if numero_mesa == 99:
+                                mesa_info.value = f"Mesa Digital - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} el {fecha_reserva_str}"
+                            else:
+                                mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada para {mesa_seleccionada.get('cliente_reservado_nombre', 'N/A')} el {fecha_reserva_str}"
                             estado["pedido_actual"] = None
                             asignar_btn.disabled = True
                             page.update()
@@ -538,12 +550,21 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                             return
                     except ValueError:
                         log.error(f"Error al parsear fecha de reserva para mesa {numero_mesa}: {fecha_reserva_str}")
-                        mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Fecha inválida)"
+                        if numero_mesa == 99:
+                            mesa_info.value = "Mesa Digital - Reservada (Fecha inválida)"
+                        else:
+                            mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Fecha inválida)"
                 else:
-                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Sin fecha)"
+                    if numero_mesa == 99:
+                        mesa_info.value = "Mesa Digital - Reservada (Sin fecha)"
+                    else:
+                        mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Reservada (Sin fecha)"
             else:
-                mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
-                log.info(f"Mesa {numero_mesa} libre - Listo para asignar cliente")
+                if numero_mesa == 99:
+                    mesa_info.value = "Mesa Digital - Lista para nuevo pedido"
+                else:
+                    mesa_info.value = f"Mesa {mesa_seleccionada['numero']} - Capacidad: {mesa_seleccionada['capacidad']} personas"
+                log.info(f"Mesa {numero_mesa} {'Digital' if numero_mesa == 99 else 'libre'} - Listo para asignar cliente")
 
             resumen_pedido.value = ""
             nota_pedido.value = ""

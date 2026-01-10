@@ -327,7 +327,7 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
         try:
             # Obtener tipo de reporte y fecha
             tipo = tipo_reporte_dropdown.value
-            # CORRECCIÓN: Extraer la fecha de manera más robusta
+            # Corrección para extraer la fecha
             fecha_text_content = fecha_text.value.strip()
             if ": " in fecha_text_content:
                 fecha_str = fecha_text_content.split(": ", 1)[1].strip()
@@ -340,22 +340,27 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
             else:
                 fecha = datetime.strptime(fecha_str, "%Y-%m-%d")
 
-            # --- OBTENER VENTAS POR HORA ---
-            ventas_por_hora = backend_service.obtener_ventas_por_hora(fecha.strftime("%Y-%m-%d"))
-            # --- FIN OBTENER VENTAS POR HORA ---
-
+            # ================================================
+            # 🔄 LLAMADAS AL BACKEND CON MANEJO DE ERRORES
+            # ================================================
+            
             # Obtener datos del backend para el reporte general
-            datos = backend_service.obtener_reporte(tipo, fecha)
+            try:
+                datos = backend_service.obtener_reporte(tipo, fecha)
+            except Exception as reporte_ex:
+                print(f"Error obteniendo reporte: {reporte_ex}")
+                datos = {
+                    "ventas_totales": 0,
+                    "pedidos_totales": 0,
+                    "productos_vendidos": 0,
+                    "productos_mas_vendidos": []
+                }
 
-            # ================================================
-            # 📌 OBTENER DATOS COMPARATIVOS REALES
-            # ================================================
-
+            # Obtener datos comparativos
             try:
                 datos_comparativos = backend_service.obtener_reporte_comparativo(tipo, fecha)
             except Exception as e:
                 print(f"Error obteniendo datos comparativos: {e}")
-                # Fallback con datos simulados
                 datos_comparativos = {
                     "actual": datos,
                     "anterior": {
@@ -364,83 +369,84 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                         "productos_vendidos": int(datos.get("productos_vendidos", 0) * 0.88)
                     }
                 }
-            
-            # Crear dashboard ejecutivo
-            dashboard_ejecutivo = crear_dashboard_ejecutivo(datos_comparativos, tipo)
-            
-            # ================================================
-            # FIN OBTENER DATOS COMPARATIVOS
-            # ================================================
 
-            start_date = None
-            end_date = None
+            # --- OBTENER VENTAS POR HORA ---
+            try:
+                ventas_por_hora = backend_service.obtener_ventas_por_hora(fecha.strftime("%Y-%m-%d"))
+            except Exception as hora_ex:
+                print(f"Error obteniendo ventas por hora: {hora_ex}")
+                ventas_por_hora = {f"{h:02d}": 0 for h in range(24)}
 
-            if tipo == "Diario":
-                start_date = fecha.strftime("%Y-%m-%d")
-                end_date = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
-            elif tipo == "Semanal":
-                # Calcular lunes de la semana
-                start_of_week = fecha - timedelta(days=fecha.weekday())
-                start_date = start_of_week.strftime("%Y-%m-%d")
-                end_date = (start_of_week + timedelta(days=6)).strftime("%Y-%m-%d")
-            elif tipo == "Mensual":
-                # Primer día del mes
-                start_date = fecha.replace(day=1).strftime("%Y-%m-%d")
-                # Último día del mes
-                if fecha.month == 12:
-                    end_date = fecha.replace(day=31).strftime("%Y-%m-%d")
-                else:
-                    # Primer día del siguiente mes - 1 día
-                    next_month = fecha.replace(day=1) + timedelta(days=32)
-                    end_date = (next_month.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
-            elif tipo == "Anual":
-                start_date = fecha.replace(month=1, day=1).strftime("%Y-%m-%d")
-                end_date = fecha.replace(month=12, day=31).strftime("%Y-%m-%d")
-            else:
-                # Default a diario si el tipo no coincide
-                start_date = fecha.strftime("%Y-%m-%d")
-                end_date = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
-            # ================================================
-
-            # Obtener datos de eficiencia de cocina (simulado si no existe)
+            # --- OBTENER EFICIENCIA DE COCINA ---
             try:
                 datos_eficiencia = backend_service.obtener_eficiencia_cocina(tipo, fecha)
                 promedio_cocina_min = datos_eficiencia.get("promedio_minutos", 0)
                 detalle_pedidos_cocina = datos_eficiencia.get("detalle_pedidos", [])
-            except AttributeError:
-                print("Método backend_service.obtener_eficiencia_cocina no encontrado. Debes crearlo.")
-                promedio_cocina_min = 0
-                detalle_pedidos_cocina = []
             except Exception as ex:
                 print(f"Error al obtener datos de eficiencia de cocina: {ex}")
                 promedio_cocina_min = 0
                 detalle_pedidos_cocina = []
 
-            # --- FIN CALCULAR EFICIENCIA DE COCINA ---
+            # --- OBTENER ANÁLISIS DE PRODUCTOS ---
+            try:
+                # Calcular fechas para análisis
+                if tipo == "Diario":
+                    start_date_analisis = fecha.strftime("%Y-%m-%d")
+                    end_date_analisis = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
+                elif tipo == "Semanal":
+                    start_of_week = fecha - timedelta(days=fecha.weekday())
+                    start_date_analisis = start_of_week.strftime("%Y-%m-%d")
+                    end_date_analisis = (start_of_week + timedelta(days=6)).strftime("%Y-%m-%d")
+                elif tipo == "Mensual":
+                    start_date_analisis = fecha.replace(day=1).strftime("%Y-%m-%d")
+                    if fecha.month == 12:
+                        end_date_analisis = fecha.replace(day=31).strftime("%Y-%m-%d")
+                    else:
+                        next_month = fecha.replace(day=1) + timedelta(days=32)
+                        end_date_analisis = (next_month.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
+                elif tipo == "Anual":
+                    start_date_analisis = fecha.replace(month=1, day=1).strftime("%Y-%m-%d")
+                    end_date_analisis = fecha.replace(month=12, day=31).strftime("%Y-%m-%d")
+                else:
+                    start_date_analisis = fecha.strftime("%Y-%m-%d")
+                    end_date_analisis = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
+                
+                datos_analisis = backend_service.obtener_analisis_productos(
+                    start_date=start_date_analisis, 
+                    end_date=end_date_analisis
+                )
+            except Exception as analisis_ex:
+                print(f"Error obteniendo análisis: {analisis_ex}")
+                datos_analisis = {
+                    "productos_mas_vendidos": [],
+                    "productos_menos_vendidos": []
+                }
 
-
+            # ================================================
+            # 📊 GENERAR REPORTES Y GRÁFICOS
+            # ================================================
+            
+            # Crear dashboard ejecutivo
+            dashboard_ejecutivo = crear_dashboard_ejecutivo(datos_comparativos, tipo)
+            
             # --- GUARDAR DATOS EN ESTADO PARA PDF ---
             estado_reporte["tipo"] = tipo
             estado_reporte["fecha"] = fecha_str
-            estado_reporte["textos"] = [] # Se llenará abajo
-            # ----------------------------------------
+            estado_reporte["textos"] = []
 
-            # Limpiar contenedor general (solo los elementos de texto existentes)
+            # Preparar controles de texto
             controles_texto = []
             controles_texto.append(ft.Text(f"Reporte {tipo} - {fecha_str}", size=20, weight=ft.FontWeight.BOLD))
             controles_texto.append(ft.Divider())
             controles_texto.append(ft.Text(f"Ventas totales: ${datos.get('ventas_totales', 0):.2f}", size=16))
             controles_texto.append(ft.Text(f"Pedidos totales: {datos.get('pedidos_totales', 0)}", size=16))
             controles_texto.append(ft.Text(f"Productos vendidos: {datos.get('productos_vendidos', 0)}", size=16))
-
-            # --- AÑADIR EFICIENCIA DE COCINA A LOS CONTROLES DE TEXTO ---
             controles_texto.append(ft.Text(f"Tiempo promedio en cocina: {promedio_cocina_min:.2f} minutos", size=16, weight=ft.FontWeight.BOLD))
-            # --- FIN AÑADIR ---
 
             if datos.get('productos_mas_vendidos'):
                 controles_texto.append(ft.Divider())
                 controles_texto.append(ft.Text("Productos más vendidos (General):", size=18, weight=ft.FontWeight.BOLD))
-                for producto in datos['productos_mas_vendidos']:
+                for producto in datos['productos_mas_vendidos'][:10]:  # Limitar a 10
                     controles_texto.append(ft.Text(f"- {producto['nombre']}: {producto['cantidad']} unidades"))
 
             controles_texto.append(ft.Divider())
@@ -449,178 +455,157 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
             if horas_con_venta:
                 for hora_str, total in sorted(horas_con_venta.items()):
                     controles_texto.append(ft.Text(f"Hora {hora_str.zfill(2)}:00 - ${total:.2f}"))
-                
-                # --- LLENAR ESTADO DE TEXTOS PARA PDF ---
-                # Extraemos el valor string de los controles de texto para el PDF
-                for control in controles_texto:
-                    if isinstance(control, ft.Text):
-                        estado_reporte["textos"].append(control.value)
-                # ----------------------------------------
             else:
                 controles_texto.append(ft.Text("No hubo ventas en esta fecha.", size=14, italic=True))
 
-            # --- GENERAR Y ACTUALIZAR GRÁFICOS CON PLOTLY ---
-            # 1. Gráfico de Resumen General (Ventas, Pedidos, Productos)
-            if datos.get('ventas_totales') is not None and datos.get('pedidos_totales') is not None and datos.get('productos_vendidos') is not None:
-                fig_resumen = go.Figure(data=[
-                    go.Bar(name='Ventas ($)', x=['Resumen'], y=[datos.get('ventas_totales', 0)], text=[f"${datos.get('ventas_totales', 0):.2f}"], textposition='auto'),
-                    go.Bar(name='Pedidos', x=['Resumen'], y=[datos.get('pedidos_totales', 0)], text=[datos.get('pedidos_totales', 0)], textposition='auto'),
-                    go.Bar(name='Productos', x=['Resumen'], y=[datos.get('productos_vendidos', 0)], text=[datos.get('productos_vendidos', 0)], textposition='auto')
-                ])
-                fig_resumen.update_layout(title_text='Resumen General', height=300)
-                # Convertir a bytes y actualizar imagen
-                img_bytes_resumen = fig_resumen.to_image(format="png", width=600, height=300, scale=1)
-                estado_reporte["img_resumen"] = img_bytes_resumen # Guardar para PDF
-                imagen_resumen.src_base64 = base64.b64encode(img_bytes_resumen).decode('utf-8')
-            else:
-                imagen_resumen.src_base64 = "" # Limpiar si no hay datos
-                print("Advertencia: Datos de resumen general incompletos.")
+            # Llenar estado para PDF
+            for control in controles_texto:
+                if isinstance(control, ft.Text):
+                    estado_reporte["textos"].append(control.value)
 
-
-            # 2. Gráfico de Productos Más Vendidos
-            if datos.get('productos_mas_vendidos'):
-                nombres_pv = [p['nombre'] for p in datos['productos_mas_vendidos']]
-                cantidades_pv = [p['cantidad'] for p in datos['productos_mas_vendidos']]
-                fig_pv = px.bar(x=nombres_pv, y=cantidades_pv, orientation='v', title='Productos Más Vendidos (General)', labels={'x': 'Producto', 'y': 'Cantidad'})
-                fig_pv.update_layout(height=300)
-                # Convertir a bytes y actualizar imagen
-                img_bytes_pv = fig_pv.to_image(format="png", width=600, height=300, scale=1)
-                estado_reporte["img_productos"] = img_bytes_pv # Guardar para PDF
-                imagen_productos_vendidos.src_base64 = base64.b64encode(img_bytes_pv).decode('utf-8')
-            else:
-                imagen_productos_vendidos.src_base64 = "" # Limpiar si no hay datos
-
-            # 3. Gráfico de Ventas por Hora
-            horas_ordenadas = sorted(ventas_por_hora.keys(), key=int)
-            horas_con_venta_datos = {h: v for h, v in ventas_por_hora.items() if v > 0}
-            if horas_con_venta_datos:
-                horas_plot = [f"{h}h" for h in sorted(horas_con_venta_datos.keys(), key=int)]
-                ventas_plot = [horas_con_venta_datos[h] for h in sorted(horas_con_venta_datos.keys(), key=int)]
-                fig_hora = go.Figure(data=go.Scatter(x=horas_plot, y=ventas_plot, mode='lines+markers', name='Ventas por Hora'))
-                fig_hora.update_layout(title='Ventas por Hora', xaxis_title='Hora del Día', yaxis_title='Ventas ($)', height=300)
-                # Convertir a bytes y actualizar imagen
-                img_bytes_hora = fig_hora.to_image(format="png", width=600, height=300, scale=1)
-                estado_reporte["img_horas"] = img_bytes_hora # Guardar para PDF
-                imagen_ventas_hora.src_base64 = base64.b64encode(img_bytes_hora).decode('utf-8')
-            else:
-                imagen_ventas_hora.src_base64 = "" # Limpiar si no hay datos
-
-
-            # --- GENERAR GRÁFICO DE EFICIENCIA DE COCINA ---
-            if detalle_pedidos_cocina:
-                # Extraer IDs de pedido y tiempos
-                ids_pedidos = [p['id'] for p in detalle_pedidos_cocina]
-                tiempos_cocina = [p['tiempo'] for p in detalle_pedidos_cocina]
-                # Crear gráfico de barras (o scatter) de tiempos por pedido
-                # Truncar IDs si son muy largos para la visualización
-                labels_pedidos = [f"Pedido {p['id']}" for p in detalle_pedidos_cocina]
-                fig_eficiencia = px.bar(x=labels_pedidos, y=tiempos_cocina, orientation='v', title=f'Tiempos de Cocina - {tipo} ({fecha_str})', labels={'x': 'Pedido', 'y': 'Tiempo (min)'})
-                fig_eficiencia.add_hline(y=promedio_cocina_min, line_dash="dash", line_color="red", annotation_text=f"Promedio: {promedio_cocina_min:.2f} min")
-                fig_eficiencia.update_layout(height=300)
-                # Convertir a bytes y actualizar imagen
-                img_bytes_eficiencia = fig_eficiencia.to_image(format="png", width=600, height=300, scale=1)
-                estado_reporte["img_eficiencia"] = img_bytes_eficiencia # Guardar para PDF
-                imagen_eficiencia_cocina.src_base64 = base64.b64encode(img_bytes_eficiencia).decode('utf-8')
-                texto_eficiencia_cocina.value = f"Promedio: {promedio_cocina_min:.2f} minutos"
-            else:
-                imagen_eficiencia_cocina.src_base64 = "" # Limpiar si no hay datos
-                texto_eficiencia_cocina.value = "No hay pedidos completados en cocina para este periodo."
-
-            # --- FIN GENERAR GRÁFICO DE EFICIENCIA DE COCINA ---
-
-
-            # --- ACTUALIZAR ANÁLISIS DE PRODUCTOS ---
-            # Calcular rango de fechas para el análisis (similar al reporte general)
-            start_date_analisis = None
-            end_date_analisis = None
-
-            if tipo == "Diario":
-                start_date_analisis = fecha.strftime("%Y-%m-%d")
-                end_date_analisis = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
-            elif tipo == "Semanal":
-                # Calcular lunes de la semana
-                start_of_week = fecha - timedelta(days=fecha.weekday())
-                start_date_analisis = start_of_week.strftime("%Y-%m-%d")
-                end_date_analisis = (start_of_week + timedelta(days=6)).strftime("%Y-%m-%d")
-            elif tipo == "Mensual":
-                # Primer día del mes
-                start_date_analisis = fecha.replace(day=1).strftime("%Y-%m-%d")
-                # Último día del mes
-                if fecha.month == 12:
-                    end_date_analisis = fecha.replace(day=31).strftime("%Y-%m-%d")
+            # --- GENERAR GRÁFICOS ---
+            # Gráfico de Resumen General
+            try:
+                if all(key in datos for key in ['ventas_totales', 'pedidos_totales', 'productos_vendidos']):
+                    fig_resumen = go.Figure(data=[
+                        go.Bar(name='Ventas ($)', x=['Resumen'], y=[datos.get('ventas_totales', 0)], 
+                            text=[f"${datos.get('ventas_totales', 0):.2f}"], textposition='auto'),
+                        go.Bar(name='Pedidos', x=['Resumen'], y=[datos.get('pedidos_totales', 0)], 
+                            text=[datos.get('pedidos_totales', 0)], textposition='auto'),
+                        go.Bar(name='Productos', x=['Resumen'], y=[datos.get('productos_vendidos', 0)], 
+                            text=[datos.get('productos_vendidos', 0)], textposition='auto')
+                    ])
+                    fig_resumen.update_layout(title_text='Resumen General', height=300)
+                    img_bytes_resumen = fig_resumen.to_image(format="png", width=600, height=300, scale=1)
+                    estado_reporte["img_resumen"] = img_bytes_resumen
+                    imagen_resumen.src_base64 = base64.b64encode(img_bytes_resumen).decode('utf-8')
                 else:
-                    # Primer día del siguiente mes - 1 día
-                    next_month = fecha.replace(day=1) + timedelta(days=32)
-                    end_date_analisis = (next_month.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
-            elif tipo == "Anual":
-                start_date_analisis = fecha.replace(month=1, day=1).strftime("%Y-%m-%d")
-                end_date_analisis = fecha.replace(month=12, day=31).strftime("%Y-%m-%d")
-            else:
-                # Default a diario si el tipo no coincide
-                start_date_analisis = fecha.strftime("%Y-%m-%d")
-                end_date_analisis = (fecha + timedelta(days=1)).strftime("%Y-%m-%d")
-            # ================================================
+                    imagen_resumen.src_base64 = ""
+            except Exception as graf_ex:
+                print(f"Error generando gráfico resumen: {graf_ex}")
+                imagen_resumen.src_base64 = ""
 
-            # Limpiar contenedor de análisis (solo texto)
+            # Gráfico de Productos Más Vendidos
+            try:
+                if datos.get('productos_mas_vendidos'):
+                    nombres_pv = [p['nombre'] for p in datos['productos_mas_vendidos'][:10]]
+                    cantidades_pv = [p['cantidad'] for p in datos['productos_mas_vendidos'][:10]]
+                    fig_pv = px.bar(x=nombres_pv, y=cantidades_pv, orientation='v', 
+                                title='Productos Más Vendidos (General)', 
+                                labels={'x': 'Producto', 'y': 'Cantidad'})
+                    fig_pv.update_layout(height=300)
+                    img_bytes_pv = fig_pv.to_image(format="png", width=600, height=300, scale=1)
+                    estado_reporte["img_productos"] = img_bytes_pv
+                    imagen_productos_vendidos.src_base64 = base64.b64encode(img_bytes_pv).decode('utf-8')
+                else:
+                    imagen_productos_vendidos.src_base64 = ""
+            except Exception as graf_ex:
+                print(f"Error generando gráfico productos: {graf_ex}")
+                imagen_productos_vendidos.src_base64 = ""
+
+            # Gráfico de Ventas por Hora
+            try:
+                horas_con_venta_datos = {h: v for h, v in ventas_por_hora.items() if v > 0}
+                if horas_con_venta_datos:
+                    horas_plot = [f"{h}h" for h in sorted(horas_con_venta_datos.keys(), key=int)]
+                    ventas_plot = [horas_con_venta_datos[h] for h in sorted(horas_con_venta_datos.keys(), key=int)]
+                    fig_hora = go.Figure(data=go.Scatter(x=horas_plot, y=ventas_plot, mode='lines+markers', 
+                                                    name='Ventas por Hora'))
+                    fig_hora.update_layout(title='Ventas por Hora', xaxis_title='Hora del Día', 
+                                        yaxis_title='Ventas ($)', height=300)
+                    img_bytes_hora = fig_hora.to_image(format="png", width=600, height=300, scale=1)
+                    estado_reporte["img_horas"] = img_bytes_hora
+                    imagen_ventas_hora.src_base64 = base64.b64encode(img_bytes_hora).decode('utf-8')
+                else:
+                    imagen_ventas_hora.src_base64 = ""
+            except Exception as graf_ex:
+                print(f"Error generando gráfico horas: {graf_ex}")
+                imagen_ventas_hora.src_base64 = ""
+
+            # Gráfico de Eficiencia de Cocina
+            try:
+                if detalle_pedidos_cocina:
+                    labels_pedidos = [f"Pedido {p['id']}" for p in detalle_pedidos_cocina[:15]]  # Limitar a 15
+                    tiempos_cocina = [p['tiempo'] for p in detalle_pedidos_cocina[:15]]
+                    fig_eficiencia = px.bar(x=labels_pedidos, y=tiempos_cocina, orientation='v', 
+                                        title=f'Tiempos de Cocina - {tipo} ({fecha_str})', 
+                                        labels={'x': 'Pedido', 'y': 'Tiempo (min)'})
+                    fig_eficiencia.add_hline(y=promedio_cocina_min, line_dash="dash", line_color="red", 
+                                        annotation_text=f"Promedio: {promedio_cocina_min:.2f} min")
+                    fig_eficiencia.update_layout(height=300)
+                    img_bytes_eficiencia = fig_eficiencia.to_image(format="png", width=600, height=300, scale=1)
+                    estado_reporte["img_eficiencia"] = img_bytes_eficiencia
+                    imagen_eficiencia_cocina.src_base64 = base64.b64encode(img_bytes_eficiencia).decode('utf-8')
+                    texto_eficiencia_cocina.value = f"Promedio: {promedio_cocina_min:.2f} minutos"
+                else:
+                    imagen_eficiencia_cocina.src_base64 = ""
+                    texto_eficiencia_cocina.value = "No hay pedidos completados en cocina para este periodo."
+            except Exception as graf_ex:
+                print(f"Error generando gráfico eficiencia: {graf_ex}")
+                imagen_eficiencia_cocina.src_base64 = ""
+                texto_eficiencia_cocina.value = "Error al generar gráfico de eficiencia."
+
+            # --- ANALISIS DE PRODUCTOS ---
             controles_analisis_texto = []
-            controles_analisis_texto.append(ft.Text(f"Análisis de Productos - {tipo} ({start_date_analisis} a {end_date_analisis})", size=20, weight=ft.FontWeight.BOLD))
+            controles_analisis_texto.append(ft.Text(f"Análisis de Productos - {tipo} ({start_date_analisis} a {end_date_analisis})", 
+                                                size=20, weight=ft.FontWeight.BOLD))
             controles_analisis_texto.append(ft.Divider())
 
-            try:
-                # Obtener datos del backend para el análisis
-                datos_analisis = backend_service.obtener_analisis_productos(start_date=start_date_analisis, end_date=end_date_analisis)
-
-                # Mostrar productos más vendidos
-                if datos_analisis.get('productos_mas_vendidos'):
-                    controles_analisis_texto.append(ft.Text("Productos más vendidos:", size=18, weight=ft.FontWeight.BOLD))
-                    for producto in datos_analisis['productos_mas_vendidos']:
-                        controles_analisis_texto.append(ft.Text(f"- {producto['nombre']}: {producto['cantidad']} veces"))
-                else:
-                    controles_analisis_texto.append(ft.Text("No se encontraron productos vendidos en este periodo.", size=14, italic=True))
-
-                controles_analisis_texto.append(ft.Divider())
-
-                # Mostrar productos menos vendidos
-                if datos_analisis.get('productos_menos_vendidos'):
-                    controles_analisis_texto.append(ft.Text("Productos menos vendidos:", size=18, weight=ft.FontWeight.BOLD))
-                    for producto in datos_analisis['productos_menos_vendidos']:
-                        controles_analisis_texto.append(ft.Text(f"- {producto['nombre']}: {producto['cantidad']} veces"))
-                else:
-                    controles_analisis_texto.append(ft.Text("No se encontraron productos menos vendidos en este periodo.", size=14, italic=True))
-
-            except Exception as ex:
-                print(f"Error al obtener análisis de productos: {ex}")
-                controles_analisis_texto.append(ft.Text(f"Error al cargar análisis de productos: {ex}", color=ft.Colors.RED))
-
-            # --- GENERAR Y ACTUALIZAR GRÁFICOS DE ANÁLISIS CON PLOTLY ---
-            # 4. Gráfico de Análisis - Más Vendidos
+            # Productos más vendidos
             if datos_analisis.get('productos_mas_vendidos'):
-                nombres_am = [p['nombre'] for p in datos_analisis['productos_mas_vendidos']]
-                cantidades_am = [p['cantidad'] for p in datos_analisis['productos_mas_vendidos']]
-                fig_am = px.bar(x=nombres_am, y=cantidades_am, orientation='v', title='Análisis - Más Vendidos', labels={'x': 'Producto', 'y': 'Cantidad'})
-                fig_am.update_layout(height=300)
-                # Convertir a bytes y actualizar imagen
-                img_bytes_am = fig_am.to_image(format="png", width=600, height=300, scale=1)
-                imagen_analisis_mas.src_base64 = base64.b64encode(img_bytes_am).decode('utf-8')
+                controles_analisis_texto.append(ft.Text("Productos más vendidos:", size=18, weight=ft.FontWeight.BOLD))
+                for producto in datos_analisis['productos_mas_vendidos'][:10]:
+                    controles_analisis_texto.append(ft.Text(f"- {producto['nombre']}: {producto['cantidad']} veces"))
             else:
-                imagen_analisis_mas.src_base64 = "" # Limpiar si no hay datos
+                controles_analisis_texto.append(ft.Text("No se encontraron productos vendidos en este periodo.", 
+                                                    size=14, italic=True))
 
-            # 5. Gráfico de Análisis - Menos Vendidos
+            controles_analisis_texto.append(ft.Divider())
+
+            # Productos menos vendidos
             if datos_analisis.get('productos_menos_vendidos'):
-                nombres_anm = [p['nombre'] for p in datos_analisis['productos_menos_vendidos']]
-                cantidades_anm = [p['cantidad'] for p in datos_analisis['productos_menos_vendidos']]
-                fig_anm = px.bar(x=nombres_anm, y=cantidades_anm, orientation='v', title='Análisis - Menos Vendidos', labels={'x': 'Producto', 'y': 'Cantidad'})
-                fig_anm.update_layout(height=300)
-                # Convertir a bytes y actualizar imagen
-                img_bytes_anm = fig_anm.to_image(format="png", width=600, height=300, scale=1)
-                imagen_analisis_menos.src_base64 = base64.b64encode(img_bytes_anm).decode('utf-8')
+                controles_analisis_texto.append(ft.Text("Productos menos vendidos:", size=18, weight=ft.FontWeight.BOLD))
+                for producto in datos_analisis['productos_menos_vendidos'][:10]:
+                    controles_analisis_texto.append(ft.Text(f"- {producto['nombre']}: {producto['cantidad']} veces"))
             else:
-                imagen_analisis_menos.src_base64 = "" # Limpiar si no hay datos
+                controles_analisis_texto.append(ft.Text("No se encontraron productos menos vendidos en este periodo.", 
+                                                    size=14, italic=True))
 
+            # Gráficos de análisis
+            try:
+                # Más vendidos
+                if datos_analisis.get('productos_mas_vendidos'):
+                    nombres_am = [p['nombre'] for p in datos_analisis['productos_mas_vendidos'][:10]]
+                    cantidades_am = [p['cantidad'] for p in datos_analisis['productos_mas_vendidos'][:10]]
+                    fig_am = px.bar(x=nombres_am, y=cantidades_am, orientation='v', 
+                                title='Análisis - Más Vendidos', 
+                                labels={'x': 'Producto', 'y': 'Cantidad'})
+                    fig_am.update_layout(height=300)
+                    img_bytes_am = fig_am.to_image(format="png", width=600, height=300, scale=1)
+                    imagen_analisis_mas.src_base64 = base64.b64encode(img_bytes_am).decode('utf-8')
+                else:
+                    imagen_analisis_mas.src_base64 = ""
 
-            # Reconstruir contenedor_reporte con DASHBOARD + texto y gráficos (imagen)
-            contenedor_reporte.content.controls = [
-                dashboard_ejecutivo,  # AÑADIR DASHBOARD AL INICIO
+                # Menos vendidos
+                if datos_analisis.get('productos_menos_vendidos'):
+                    nombres_anm = [p['nombre'] for p in datos_analisis['productos_menos_vendidos'][:10]]
+                    cantidades_anm = [p['cantidad'] for p in datos_analisis['productos_menos_vendidos'][:10]]
+                    fig_anm = px.bar(x=nombres_anm, y=cantidades_anm, orientation='v', 
+                                title='Análisis - Menos Vendidos', 
+                                labels={'x': 'Producto', 'y': 'Cantidad'})
+                    fig_anm.update_layout(height=300)
+                    img_bytes_anm = fig_anm.to_image(format="png", width=600, height=300, scale=1)
+                    imagen_analisis_menos.src_base64 = base64.b64encode(img_bytes_anm).decode('utf-8')
+                else:
+                    imagen_analisis_menos.src_base64 = ""
+            except Exception as graf_ex:
+                print(f"Error generando gráficos análisis: {graf_ex}")
+                imagen_analisis_mas.src_base64 = ""
+                imagen_analisis_menos.src_base64 = ""
+
+            # Reconstruir contenedores
+            contenedor_reporte.content = ft.Column([
+                dashboard_ejecutivo,
                 ft.Divider(),
             ] + controles_texto + [
                 ft.Text("Gráfico Resumen General", size=16, weight=ft.FontWeight.BOLD),
@@ -629,46 +614,41 @@ def crear_vista_reportes(backend_service, on_update_ui, page):
                 imagen_productos_vendidos,
                 ft.Text("Gráfico Ventas por Hora", size=16, weight=ft.FontWeight.BOLD),
                 imagen_ventas_hora,
-                # --- AÑADIR CONTENEDOR DE EFICIENCIA ---
                 contenedor_eficiencia_cocina
-                # --- FIN AÑADIR ---
-            ]
+            ])
 
-            # Reconstruir contenedor_analisis con texto y gráficos (imagen)
-            contenedor_analisis.content.controls = controles_analisis_texto + [
-                ft.Text("Gráfico Análisis - Más Vendidos", size=16, weight=ft.FontWeight.BOLD),
-                imagen_analisis_mas,
-                ft.Text("Gráfico Análisis - Menos Vendidos", size=16, weight=ft.FontWeight.BOLD),
-                imagen_analisis_menos,
-            ]
-
-            # --- FIN ACTUALIZAR DATOS DE LOS GRÁFICOS ---
+            contenedor_analisis.content = ft.Column(
+                controles_analisis_texto + [
+                    ft.Text("Gráfico Análisis - Más Vendidos", size=16, weight=ft.FontWeight.BOLD),
+                    imagen_analisis_mas,
+                    ft.Text("Gráfico Análisis - Menos Vendidos", size=16, weight=ft.FontWeight.BOLD),
+                    imagen_analisis_menos,
+                ]
+            )
 
             page.update()
+
         except Exception as ex:
-            print(f"Error al actualizar reporte general: {ex}")
+            print(f"Error general en actualizar_reporte: {ex}")
             import traceback
-            traceback.print_exc() # Imprime el traceback completo para depuración
-            # Opcional: Mostrar error en la UI
-            contenedor_reporte.content.controls.clear()
-            contenedor_reporte.content.controls.append(
-                ft.Text(f"Error al cargar reporte: {ex}", color=ft.Colors.RED)
-            )
-            contenedor_analisis.content.controls.clear()
-            contenedor_analisis.content.controls.append(
-                ft.Text(f"Error al cargar análisis: {ex}", color=ft.Colors.RED)
-            )
-            # Limpiar imágenes en caso de error
-            imagen_resumen.src_base64 = ""
-            imagen_productos_vendidos.src_base64 = ""
-            imagen_ventas_hora.src_base64 = ""
-            imagen_analisis_mas.src_base64 = ""
-            imagen_analisis_menos.src_base64 = ""
-            # Limpiar imagen de eficiencia
-            imagen_eficiencia_cocina.src_base64 = ""
-            texto_eficiencia_cocina.value = "Error al cargar datos de eficiencia."
+            traceback.print_exc()
             
-            vista.update()  # ← Actualizar toda la vista
+            contenedor_reporte.content = ft.Column([
+                ft.Text(f"Error al cargar reporte: {str(ex)}", color=ft.Colors.RED)
+            ])
+            contenedor_analisis.content = ft.Column([
+                ft.Text(f"Error al cargar análisis: {str(ex)}", color=ft.Colors.RED)
+            ])
+            
+            # Limpiar todas las imágenes
+            imagenes = [
+                imagen_resumen, imagen_productos_vendidos, imagen_ventas_hora,
+                imagen_analisis_mas, imagen_analisis_menos, imagen_eficiencia_cocina
+            ]
+            for img in imagenes:
+                img.src_base64 = ""
+            
+            texto_eficiencia_cocina.value = "Error al cargar datos de eficiencia."
             page.update()
 
 
