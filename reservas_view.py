@@ -221,5 +221,5 @@ def crear_vista_reservas(reservas_service, clientes_service, mesas_service, on_u
         expand=True
     )
 
-    # vista.cargar_clientes_mesas = cargar_clientes_mesas # Si decides usarlo
+    vista.cargar_clientes = cargar_clientes
     return vista

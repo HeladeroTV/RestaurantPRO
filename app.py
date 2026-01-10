@@ -133,6 +133,37 @@ def crear_selector_item(menu):
                     return item
         return None
     container.get_selected_item = get_selected_item
+
+    def update_menu_data(new_menu):
+        nonlocal menu
+        menu = new_menu
+        # Preservar selección actual si es posible
+        seleccion_actual = items_dropdown.value
+        tipo_actual = tipo_dropdown.value
+        
+        tipos = list(set(item["tipo"] for item in menu))
+        tipos.sort()
+        tipo_dropdown.options = [ft.dropdown.Option(tipo) for tipo in tipos]
+        
+        # Si el tipo seleccionado sigue existiendo, mantenerlo
+        if tipo_actual not in tipos and tipos:
+            tipo_dropdown.value = tipos[0]
+        else:
+             tipo_dropdown.value = tipo_actual
+             
+        # Actualizar lista de items manteniendo selección si existe
+        actualizar_items(None)
+        
+        # Restaurar selección de item si aún existe en la lista filtrada
+        opciones_nombres = [opt.key for opt in items_dropdown.options]
+        if seleccion_actual in opciones_nombres:
+            items_dropdown.value = seleccion_actual
+        else:
+             items_dropdown.value = None
+             
+        container.update()
+
+    container.update_menu_data = update_menu_data
     log.debug("Selector de ítems creado correctamente")
     return container
 
@@ -652,6 +683,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                     eliminado = items.pop()
                     pedido_actual["items"] = items
                     estado["pedido_actual"] = pedido_actual
+                    resumen_pedido.value = generar_resumen_pedido(estado["pedido_actual"])
                     log.debug(f"Ítem eliminado en memoria: {eliminado['nombre']}")
                 else:
                     resumen_pedido.value = "Sin items."
@@ -661,6 +693,7 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
                 pedido_actualizado = next((p for p in pedidos_activos if p["id"] == pedido_actual["id"]), None)
                 if pedido_actualizado:
                     estado["pedido_actual"] = pedido_actualizado
+                    resumen_pedido.value = generar_resumen_pedido(estado["pedido_actual"])
                     log.info(f"Último ítem eliminado en BD - Pedido ID: {pedido_actual['id']}")
                 else:
                     resumen_pedido.value = "Sin items."
@@ -781,6 +814,11 @@ def crear_panel_gestion(backend_service, menu, on_update_ui, page, primary_color
         expand=True
     )
     panel.seleccionar_mesa = seleccionar_mesa_interna
+    
+    def actualizar_menu_gestion(novo_menu):
+        selector_item.update_menu_data(novo_menu)
+    panel.actualizar_menu = actualizar_menu_gestion
+
     log.info("Panel de gestión de pedidos creado correctamente")
     return panel
 
@@ -1151,6 +1189,24 @@ def crear_vista_admin(backend_service, menu, on_update_ui, page):
     )
     
     vista.actualizar_lista_clientes = actualizar_lista_clientes
+
+    def actualizar_menu_admin(novo_menu):
+        nonlocal menu
+        menu = novo_menu
+        tipos = list(set(item["tipo"] for item in menu))
+        tipos.sort()
+        
+        tipo_item_admin.options = [ft.dropdown.Option(tipo) for tipo in tipos]
+        if tipo_item_admin.value not in tipos and tipos:
+             tipo_item_admin.value = tipos[0]
+             
+        tipo_item_eliminar.options = [ft.dropdown.Option(tipo) for tipo in tipos]
+        if tipo_item_eliminar.value not in tipos and tipos:
+             tipo_item_eliminar.value = tipos[0]
+             
+        actualizar_items_eliminar(None)
+
+    vista.actualizar_menu = actualizar_menu_admin
     log.info("Vista de Administración creada correctamente")
     return vista
 
@@ -1777,6 +1833,16 @@ class RestauranteGUI:
     def actualizar_ui_completo(self):
         log.debug("↻ actualizar_ui_completo() llamado - Iniciando refresco completo de UI")
         
+        try:
+            self.menu_cache = self.backend_service.obtener_menu()
+            if self.panel_gestion and hasattr(self.panel_gestion, 'actualizar_menu'):
+                self.panel_gestion.actualizar_menu(self.menu_cache)
+            if self.vista_admin and hasattr(self.vista_admin, 'actualizar_menu'):
+                self.vista_admin.actualizar_menu(self.menu_cache)
+            log.debug(f"Menú recargado y propagado: {len(self.menu_cache)} ítems")
+        except Exception as e:
+            log.error(f"Error al recargar menú: {e}")
+
         nuevo_grid = crear_mesas_grid(self.backend_service, self.seleccionar_mesa, self)
         self.mesas_grid.controls = nuevo_grid.controls
         self.mesas_grid.update()
@@ -1809,9 +1875,8 @@ class RestauranteGUI:
         self.page.update()
         log.debug("page.update() ejecutado - UI refrescada completamente")
         
-        if hasattr(self.vista_reservas, 'cargar_clientes_mesas'):
-            pass  # Aquí puedes descomentar cuando lo implementes
-            # self.vista_reservas.cargar_clientes_mesas()
+        if hasattr(self.vista_reservas, 'cargar_clientes'):
+            self.vista_reservas.cargar_clientes()
         log.debug("Vista Reservas lista para actualizar (método disponible)")
         
         log.info("✓ Actualización completa de UI finalizada con éxito")
